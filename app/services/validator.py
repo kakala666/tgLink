@@ -9,6 +9,7 @@ import asyncio
 import logging
 from typing import Optional, Tuple
 from dataclasses import dataclass
+from pathlib import Path
 
 import httpx
 
@@ -49,7 +50,12 @@ VALID_INDICATORS = [
     "Join Group",
     "Join Channel",
     "Preview channel",
+    "tgme_page_extra",  # Telegram 页面特有的 class
 ]
+
+# 调试：保存失败的 HTML（设为 True 开启）
+DEBUG_SAVE_FAILED_HTML = True
+DEBUG_HTML_DIR = Path(__file__).parent.parent.parent / "debug_html"
 
 
 @dataclass
@@ -207,6 +213,21 @@ class TelegramValidator:
         
         return result
     
+    def _save_debug_html(self, url: str, html: str, reason: str):
+        """保存失败的 HTML 用于调试"""
+        if not DEBUG_SAVE_FAILED_HTML:
+            return
+        try:
+            DEBUG_HTML_DIR.mkdir(parents=True, exist_ok=True)
+            # 从 URL 提取用户名
+            username = url.split('/')[-1].split('?')[0]
+            filename = f"{username}_{reason}_{int(time.time())}.html"
+            filepath = DEBUG_HTML_DIR / filename
+            filepath.write_text(html, encoding='utf-8')
+            logger.debug(f"保存调试HTML: {filepath}")
+        except Exception as e:
+            logger.error(f"保存调试HTML失败: {e}")
+    
     async def validate(self, url: str) -> ValidationResult:
         """
         验证单个链接
@@ -231,7 +252,11 @@ class TelegramValidator:
             result.http_status = response.status_code
             
             if response.status_code == 200:
-                return self._parse_response(response.text, response.status_code)
+                parsed_result = self._parse_response(response.text, response.status_code)
+                # 如果验证失败，保存 HTML 用于调试
+                if parsed_result.is_valid == False:
+                    self._save_debug_html(url, response.text, parsed_result.error_type or "unknown")
+                return parsed_result
             elif response.status_code == 404:
                 result.is_valid = False
                 result.error_type = "not_found"
