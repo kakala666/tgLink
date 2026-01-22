@@ -96,5 +96,5 @@ SERVER_HOST = "0.0.0.0"
 SERVER_PORT = 8000
 
 # ============ 日志配置 ============
-LOG_LEVEL = "DEBUG"  # 调试时使用DEBUG，生产环境改为INFO
+LOG_LEVEL = "INFO"  # 生产环境用INFO，调试时改为DEBUG
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
