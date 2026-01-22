@@ -317,6 +317,13 @@ class TaskRunner:
                 if result.error_type == 'rate_limit' and self.rate_limiter:
                     self.rate_limiter.report_rate_limit()
             
+            # 隐性限流也触发暂停
+            if result.error_type == 'rate_limit_hidden' and self.block_detector:
+                logger.warning(f"检测到隐性限流，触发阻止检测")
+                # 模拟连续429错误，触发暂停
+                for _ in range(config.BLOCK_DETECTION_THRESHOLD):
+                    await self.block_detector.report_error(429)
+            
             # 数据库操作放到线程池（不阻塞事件循环）
             await asyncio.to_thread(
                 self._save_result_sync,

@@ -229,7 +229,19 @@ class TelegramValidator:
             logger.info(f"[{url}] 有效: {group_name}, 来源: {source}")
             return result
         
-        # 3.4 无法提取任何信息 → 无效
+        # 3.4 检测隐性限流：title是联系页面格式 + HTML长度正常 = 可能是限流
+        title_match = TITLE_PATTERN.search(html)
+        if title_match:
+            title = title_match.group(1).strip()
+            if title.lower().startswith("telegram: contact") and len(html) > 5000:
+                # 这是 Telegram 的隐性限流，返回了简化页面
+                result.is_valid = None  # 待重试
+                result.error_type = "rate_limit_hidden"
+                result.error_message = "疑似隐性限流(返回简化页面)"
+                logger.warning(f"[{url}] 疑似限流: 返回简化页面 (title={title}, html_len={len(html)})")
+                return result
+        
+        # 3.5 无法提取任何信息 → 无效
         result.is_valid = False
         result.error_type = "no_group_name"
         result.error_message = "无法提取群名"
