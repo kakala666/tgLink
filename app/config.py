@@ -30,8 +30,11 @@ CLASH_PROXY_PORT = 7897
 PROXY_CONCURRENCY = 50  # 代理模式下可以高并发
 
 # ============ 直连模式配置 ============
-# 直连模式下的并发数
-DIRECT_CONCURRENCY = 50  # 直连也支持高并发
+# 直连模式下的并发数（太高会被Telegram限流）
+DIRECT_CONCURRENCY = 10  # 降低到10，避免被限流
+
+# 每批次之间的间隔（秒），让Telegram服务器喘口气
+BATCH_DELAY = 1.0
 
 # ============ 限速配置 ============
 # 令牌桶容量

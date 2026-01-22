@@ -270,6 +270,11 @@ class TaskRunner:
                 
                 await asyncio.gather(*tasks, return_exceptions=True)
                 
+                # 批次间隔，避免被Telegram限流
+                batch_delay = getattr(config, 'BATCH_DELAY', 0)
+                if batch_delay > 0:
+                    await asyncio.sleep(batch_delay)
+                
                 # 更新统计
                 self._update_stats(runner)
                 
