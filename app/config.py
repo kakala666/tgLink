@@ -17,7 +17,7 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 # 代理总开关
 # True: 使用Clash代理池，50并发，约14小时完成120万链接
 # False: 直连模式，使用DIRECT_REQUEST_INTERVAL控制频率
-PROXY_ENABLED = True
+PROXY_ENABLED = False  # 默认关闭，需要Clash才能开启
 
 # Clash API配置
 CLASH_API_URL = "http://127.0.0.1:9090"
@@ -93,5 +93,5 @@ SERVER_HOST = "0.0.0.0"
 SERVER_PORT = 8000
 
 # ============ 日志配置 ============
-LOG_LEVEL = "INFO"
+LOG_LEVEL = "DEBUG"  # 调试时使用DEBUG，生产环境改为INFO
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

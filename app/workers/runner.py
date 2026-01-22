@@ -306,7 +306,9 @@ class TaskRunner:
             JobService.update_item_status(item_id, JobItemStatus.PROCESSING)
             
             # 验证
+            logger.debug(f"开始验证: {url}")
             result = await self.validator_pool.validate(url)
+            logger.info(f"验证结果: {url} -> valid={result.is_valid}, status={result.http_status}, error={result.error_type}, msg={result.error_message}")
             
             # 检测阻止
             if result.http_status and self.block_detector:
@@ -347,7 +349,7 @@ class TaskRunner:
             runner.stats.processed_count += 1
             
         except Exception as e:
-            logger.error(f"验证项 {item_id} 时出错: {e}")
+            logger.error(f"验证项 {item_id} ({url}) 时出错: {e}", exc_info=True)
             JobService.update_item_status(item_id, JobItemStatus.ERROR)
             JobService.increment_job_count(job_id, 'error_count')
             runner.stats.error_count += 1

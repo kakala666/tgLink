@@ -39,6 +39,7 @@ INVALID_INDICATORS = [
     "this chat is private",  # 私有群
     "Group not found",  # 群组不存在
     "Channel not found",  # 频道不存在
+    "Telegram: Contact @",  # 联系页面（不是群组）
 ]
 
 
@@ -127,6 +128,23 @@ class TelegramValidator:
                     logger.debug(f"从title提取群名: {group_name}")
         
         result.group_name = group_name
+        
+        # 检查群名是否是无效的格式
+        if result.group_name:
+            invalid_names = [
+                "telegram: contact",
+                "telegram: join group",
+                "telegram",
+            ]
+            name_lower = result.group_name.lower()
+            # 检查是否是 "Telegram: Contact @xxx" 格式
+            if name_lower.startswith("telegram: contact") or name_lower in invalid_names:
+                result.is_valid = False
+                result.error_type = "invalid_group"
+                result.error_message = "不是有效的群组或频道"
+                result.group_name = None
+                logger.debug(f"群名无效: {group_name}")
+                return result
         
         # 如果有群名，认为有效
         if result.group_name:
