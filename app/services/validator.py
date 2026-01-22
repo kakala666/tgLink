@@ -54,7 +54,7 @@ VALID_INDICATORS = [
 ]
 
 # 调试：保存失败的 HTML（设为 True 开启）
-DEBUG_SAVE_FAILED_HTML = True
+DEBUG_SAVE_FAILED_HTML = False  # 关闭保存HTML
 DEBUG_HTML_DIR = Path(__file__).parent.parent.parent / "debug_html"
 
 
@@ -120,13 +120,14 @@ class TelegramValidator:
             "Upgrade-Insecure-Requests": "1",
         }
     
-    def _parse_response(self, html: str, status_code: int) -> ValidationResult:
+    def _parse_response(self, html: str, status_code: int, url: str = "") -> ValidationResult:
         """
         解析响应内容
         
         Args:
             html: HTML内容
             status_code: HTTP状态码
+            url: 请求的URL（用于日志）
             
         Returns:
             ValidationResult
@@ -134,10 +135,7 @@ class TelegramValidator:
         result = ValidationResult(http_status=status_code)
         html_lower = html.lower()
         
-        logger.debug(f"解析响应，HTML长度: {len(html)}")
-        
-        # 优先检查有效群组/频道标识
-        has_valid_indicator = any(ind.lower() in html_lower for ind in VALID_INDICATORS)
+        logger.debug(f"[{url}] 解析响应，HTML长度: {len(html)}")
         
         # 提取群名 - 尝试多种模式
         group_name = None
@@ -145,7 +143,6 @@ class TelegramValidator:
             og_match = pattern.search(html)
             if og_match:
                 group_name = og_match.group(1).strip()
-                logger.debug(f"从og:title提取群名: {group_name}")
                 break
         
         if not group_name:
@@ -155,13 +152,30 @@ class TelegramValidator:
                 # 过滤掉默认标题
                 if title and title.lower() not in ['telegram', 'telegram: contact', 'telegram: join group chat']:
                     group_name = title
-                    logger.debug(f"从title提取群名: {group_name}")
         
-        result.group_name = group_name
+        # 检查无效标识（优先判断明确无效的情况）
+        for indicator in INVALID_INDICATORS:
+            if indicator.lower() in html_lower:
+                result.is_valid = False
+                result.error_type = "invalid_group"
+                result.error_message = indicator
+                logger.info(f"[{url}] 无效: {indicator}")
+                return result
         
-        # 如果有有效标识且有群名，认为有效
-        if has_valid_indicator and result.group_name:
+        # 如果有群名，进一步检查
+        if group_name:
+            # 过滤掉用户联系页面
+            name_lower = group_name.lower()
+            if name_lower.startswith("telegram: contact"):
+                result.is_valid = False
+                result.error_type = "invalid_group"
+                result.error_message = "用户联系页面"
+                logger.info(f"[{url}] 无效: 用户联系页面 ({group_name})")
+                return result
+            
+            # 有群名就认为有效
             result.is_valid = True
+            result.group_name = group_name
             
             # 尝试提取成员数
             member_match = MEMBER_COUNT_PATTERN.search(html)
@@ -178,38 +192,28 @@ class TelegramValidator:
                     result.description = desc_match.group(1).strip()[:500]
                     break
             
-            logger.info(f"验证成功: {result.group_name}, 成员: {result.member_count}")
+            logger.info(f"[{url}] 有效: {group_name}, 成员: {result.member_count}")
             return result
         
-        # 检查无效标识
-        for indicator in INVALID_INDICATORS:
-            if indicator.lower() in html_lower:
-                result.is_valid = False
-                result.error_type = "invalid_group"
-                result.error_message = indicator
-                result.group_name = None
-                logger.debug(f"检测到无效标识: {indicator}")
-                return result
-        
-        # 有群名但没有有效标识，可能是用户页面
-        if result.group_name:
-            name_lower = result.group_name.lower()
-            if name_lower.startswith("telegram: contact"):
-                result.is_valid = False
-                result.error_type = "invalid_group"
-                result.error_message = "用户联系页面，不是群组或频道"
-                result.group_name = None
-                return result
-            # 有群名，认为有效
-            result.is_valid = True
-            logger.info(f"验证成功: {result.group_name}")
-            return result
-        
-        # 无法提取群名
+        # 无法提取群名 - 记录详细信息用于调试
         result.is_valid = False
         result.error_type = "no_group_name"
-        result.error_message = "无法从页面提取群名"
-        logger.warning(f"无法提取群名，HTML前500字符: {html[:500]}")
+        result.error_message = "无法提取群名"
+        
+        # 尝试找出页面实际内容
+        og_title_raw = ""
+        title_raw = ""
+        if '<meta' in html and 'og:title' in html:
+            og_title_raw = html[html.find('og:title'):html.find('og:title')+200]
+        if '<title>' in html:
+            start = html.find('<title>')
+            end = html.find('</title>')
+            if end > start:
+                title_raw = html[start:end+8]
+        
+        logger.warning(f"[{url}] 无效: 无法提取群名 | og:title附近: {og_title_raw[:100]} | title: {title_raw[:100]}")
+        
+        return result
         
         return result
     
@@ -252,7 +256,7 @@ class TelegramValidator:
             result.http_status = response.status_code
             
             if response.status_code == 200:
-                parsed_result = self._parse_response(response.text, response.status_code)
+                parsed_result = self._parse_response(response.text, response.status_code, url)
                 # 如果验证失败，保存 HTML 用于调试
                 if parsed_result.is_valid == False:
                     self._save_debug_html(url, response.text, parsed_result.error_type or "unknown")
@@ -261,32 +265,38 @@ class TelegramValidator:
                 result.is_valid = False
                 result.error_type = "not_found"
                 result.error_message = "页面不存在"
+                logger.info(f"[{url}] 无效: 404 页面不存在")
             elif response.status_code == 429:
                 result.is_valid = None  # 待重试
                 result.error_type = "rate_limit"
                 result.error_message = "请求过于频繁"
+                logger.warning(f"[{url}] 错误: 429 请求过于频繁")
             elif response.status_code in [403, 503]:
                 result.is_valid = None
                 result.error_type = "blocked"
                 result.error_message = f"被封禁或服务不可用: {response.status_code}"
+                logger.warning(f"[{url}] 错误: {response.status_code} 被封禁")
             else:
                 result.is_valid = None
                 result.error_type = "http_error"
                 result.error_message = f"HTTP错误: {response.status_code}"
+                logger.warning(f"[{url}] 错误: HTTP {response.status_code}")
                 
         except httpx.TimeoutException:
             result.response_time_ms = int((time.time() - start_time) * 1000)
             result.error_type = "timeout"
             result.error_message = "请求超时"
+            logger.warning(f"[{url}] 错误: 请求超时")
         except httpx.ConnectError as e:
             result.response_time_ms = int((time.time() - start_time) * 1000)
             result.error_type = "connect_error"
             result.error_message = f"连接错误: {str(e)[:200]}"
+            logger.warning(f"[{url}] 错误: 连接失败")
         except Exception as e:
             result.response_time_ms = int((time.time() - start_time) * 1000)
             result.error_type = "unknown_error"
             result.error_message = f"未知错误: {str(e)[:200]}"
-            logger.exception(f"验证链接时发生错误: {url}")
+            logger.exception(f"[{url}] 错误: 未知异常")
         
         return result
     
