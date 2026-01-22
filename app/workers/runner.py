@@ -245,10 +245,6 @@ class TaskRunner:
                 # 检查暂停信号
                 await runner._pause_event.wait()
                 
-                # 检查阻止状态
-                if self.block_detector:
-                    await self.block_detector.wait_if_blocked()
-                
                 # 获取待处理项
                 items = JobService.get_pending_items(job_id, limit=batch_size)
                 logger.info(f"获取到 {len(items)} 个待处理项 (limit={batch_size})")
@@ -309,20 +305,13 @@ class TaskRunner:
             result = await self.validator_pool.validate(url)
             logger.info(f"验证结果: {url} -> valid={result.is_valid}, status={result.http_status}, error={result.error_type}, msg={result.error_message}")
             
-            # 检测阻止
-            if result.http_status and self.block_detector:
-                await self.block_detector.report_error(result.http_status)
+            # 检测阻止（仅记录日志，不自动暂停）
+            if result.http_status and result.http_status in [429, 403, 503]:
+                logger.warning(f"检测到HTTP {result.http_status}，可能被限流")
                 
-                # 如果是速率限制，通知限速器
-                if result.error_type == 'rate_limit' and self.rate_limiter:
-                    self.rate_limiter.report_rate_limit()
-            
-            # 隐性限流也触发暂停
-            if result.error_type == 'rate_limit_hidden' and self.block_detector:
-                logger.warning(f"检测到隐性限流，触发阻止检测")
-                # 模拟连续429错误，触发暂停
-                for _ in range(config.BLOCK_DETECTION_THRESHOLD):
-                    await self.block_detector.report_error(429)
+            # 隐性限流仅记录日志
+            if result.error_type == 'rate_limit_hidden':
+                logger.warning(f"检测到隐性限流: {url}")
             
             # 数据库操作放到线程池（不阻塞事件循环）
             await asyncio.to_thread(
