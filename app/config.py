@@ -15,23 +15,23 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # ============ 代理配置 ============
 # 代理总开关
-# True: 使用Clash代理池，50并发，约14小时完成120万链接
-# False: 直连模式，使用DIRECT_REQUEST_INTERVAL控制频率
-PROXY_ENABLED = False  # 默认关闭，需要Clash才能开启
+# True: 使用Clash代理池
+# False: 直连模式
+PROXY_ENABLED = False  # 默认直连
 
-# Clash API配置
-CLASH_API_URL = "http://127.0.0.1:9090"
-CLASH_API_SECRET = ""  # 如果Clash设置了secret，在这里填写
+# Clash API配置（用于获取代理列表，可选）
+CLASH_API_URL = "http://127.0.0.1:9097"
+CLASH_API_SECRET = "abcdefg"  # 如果Clash设置了secret，在这里填写
 
-# 代理模式下的并发数（使用60个节点轮询）
-PROXY_CONCURRENCY = 50
+# Clash HTTP代理端口（用于实际请求）
+CLASH_PROXY_PORT = 7897
+
+# 代理模式下的并发数
+PROXY_CONCURRENCY = 50  # 代理模式下可以高并发
 
 # ============ 直连模式配置 ============
-# 直连模式下的请求间隔（秒）
-DIRECT_REQUEST_INTERVAL = 1.0
-
-# 直连模式下的并发数（建议保持1，避免被封）
-DIRECT_CONCURRENCY = 1
+# 直连模式下的并发数
+DIRECT_CONCURRENCY = 50  # 直连也支持高并发
 
 # ============ 限速配置 ============
 # 令牌桶容量

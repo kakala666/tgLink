@@ -160,7 +160,7 @@ class TokenBucketRateLimiter:
 
 
 class SimpleRateLimiter:
-    """简单限速器（用于直连模式）"""
+    """简单限速器（已弃用，保留兼容性）"""
     
     def __init__(self, interval: float = None):
         """
@@ -169,7 +169,7 @@ class SimpleRateLimiter:
         Args:
             interval: 请求间隔（秒）
         """
-        self.interval = interval or config.DIRECT_REQUEST_INTERVAL
+        self.interval = interval or 1.0  # 默认1秒
         self.last_request = 0.0
         self._lock = asyncio.Lock()
     

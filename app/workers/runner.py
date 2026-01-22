@@ -233,6 +233,8 @@ class TaskRunner:
         job_id = runner.job_id
         batch_size = config.PROXY_CONCURRENCY if config.PROXY_ENABLED else config.DIRECT_CONCURRENCY
         
+        logger.info(f"=== 任务启动 === PROXY_ENABLED={config.PROXY_ENABLED}, batch_size={batch_size}")
+        
         try:
             while True:
                 # 检查停止信号
@@ -249,6 +251,7 @@ class TaskRunner:
                 
                 # 获取待处理项
                 items = JobService.get_pending_items(job_id, limit=batch_size)
+                logger.info(f"获取到 {len(items)} 个待处理项 (limit={batch_size})")
                 if not items:
                     # 没有待处理项，任务完成
                     JobService.update_job_status(job_id, JobStatus.COMPLETED)
@@ -296,16 +299,7 @@ class TaskRunner:
         url = item['normalized_url']
         
         try:
-            # 限速
-            if config.PROXY_ENABLED:
-                await self.rate_limiter.wait_for_token()
-            else:
-                await self.simple_limiter.wait()
-            
-            # 更新项状态
-            JobService.update_item_status(item_id, JobItemStatus.PROCESSING)
-            
-            # 验证
+            # 直接验证，不限速
             logger.debug(f"开始验证: {url}")
             result = await self.validator_pool.validate(url)
             logger.info(f"验证结果: {url} -> valid={result.is_valid}, status={result.http_status}, error={result.error_type}, msg={result.error_message}")
@@ -318,41 +312,59 @@ class TaskRunner:
                 if result.error_type == 'rate_limit' and self.rate_limiter:
                     self.rate_limiter.report_rate_limit()
             
-            # 保存结果
-            JobService.save_result(job_id, link_id, {
-                'is_valid': result.is_valid,
-                'group_name': result.group_name,
-                'member_count': result.member_count,
-                'description': result.description,
-                'http_status': result.http_status,
-                'error_type': result.error_type,
-                'error_message': result.error_message,
-                'response_time_ms': result.response_time_ms,
-                'proxy_used': result.proxy_used
-            })
+            # 数据库操作放到线程池（不阻塞事件循环）
+            await asyncio.to_thread(
+                self._save_result_sync,
+                job_id, item_id, link_id, result
+            )
             
-            # 更新项状态
-            JobService.update_item_status(item_id, JobItemStatus.COMPLETED)
-            
-            # 更新任务计数
+            # 更新内存统计
             if result.is_valid is True:
-                JobService.increment_job_count(job_id, 'valid_count')
                 runner.stats.valid_count += 1
             elif result.is_valid is False:
-                JobService.increment_job_count(job_id, 'invalid_count')
                 runner.stats.invalid_count += 1
             else:
-                JobService.increment_job_count(job_id, 'error_count')
                 runner.stats.error_count += 1
             
-            JobService.increment_job_count(job_id, 'pending_count', -1)
             runner.stats.processed_count += 1
             
         except Exception as e:
             logger.error(f"验证项 {item_id} ({url}) 时出错: {e}", exc_info=True)
-            JobService.update_item_status(item_id, JobItemStatus.ERROR)
-            JobService.increment_job_count(job_id, 'error_count')
+            await asyncio.to_thread(
+                JobService.update_item_status, item_id, JobItemStatus.ERROR
+            )
+            await asyncio.to_thread(
+                JobService.increment_job_count, job_id, 'error_count'
+            )
             runner.stats.error_count += 1
+    
+    def _save_result_sync(self, job_id: int, item_id: int, link_id: int, result):
+        """同步保存结果（在线程池中执行）"""
+        # 保存结果
+        JobService.save_result(job_id, link_id, {
+            'is_valid': result.is_valid,
+            'group_name': result.group_name,
+            'member_count': result.member_count,
+            'description': result.description,
+            'http_status': result.http_status,
+            'error_type': result.error_type,
+            'error_message': result.error_message,
+            'response_time_ms': result.response_time_ms,
+            'proxy_used': result.proxy_used
+        })
+        
+        # 更新项状态
+        JobService.update_item_status(item_id, JobItemStatus.COMPLETED)
+        
+        # 更新任务计数
+        if result.is_valid is True:
+            JobService.increment_job_count(job_id, 'valid_count')
+        elif result.is_valid is False:
+            JobService.increment_job_count(job_id, 'invalid_count')
+        else:
+            JobService.increment_job_count(job_id, 'error_count')
+        
+        JobService.increment_job_count(job_id, 'pending_count', -1)
     
     def _update_stats(self, runner: JobRunner):
         """更新统计信息"""

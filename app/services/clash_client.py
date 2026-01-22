@@ -36,6 +36,8 @@ class ClashClient:
         self.api_url = (api_url or config.CLASH_API_URL).rstrip('/')
         self.secret = secret or config.CLASH_API_SECRET
         self.timeout = httpx.Timeout(10.0)
+        # 访问本地 Clash API 时禁用代理
+        self._client_kwargs = {"timeout": self.timeout, "trust_env": False}
     
     def _get_headers(self) -> dict:
         """获取请求头"""
@@ -52,7 +54,7 @@ class ClashClient:
             代理列表
         """
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with httpx.AsyncClient(**self._client_kwargs) as client:
                 response = await client.get(
                     f"{self.api_url}/proxies",
                     headers=self._get_headers()
@@ -62,18 +64,35 @@ class ClashClient:
                 data = response.json()
                 proxies = []
                 
+                # 调试：打印所有代理类型
+                all_types = set()
+                for name, info in data.get('proxies', {}).items():
+                    all_types.add(info.get('type', 'unknown'))
+                logger.debug(f"Clash 代理类型: {all_types}")
+                
+                # 排除的类型（代理组和特殊类型）
+                excluded_types = {
+                    'Direct', 'Reject', 'RejectDrop', 'Pass', 'Compatible',
+                    'Selector', 'URLTest', 'Fallback', 'LoadBalance', 'Relay'
+                }
+                
                 for name, info in data.get('proxies', {}).items():
                     proxy_type = info.get('type', '')
                     
-                    # 只返回可用的代理类型
-                    if proxy_type in ['Shadowsocks', 'VMess', 'VLESS', 'Trojan', 'HTTP', 'SOCKS5']:
+                    # 排除代理组和特殊类型
+                    if proxy_type and proxy_type not in excluded_types:
+                        # 安全获取 delay
+                        history = info.get('history') or []
+                        delay = history[-1].get('delay') if history else None
+                        
                         proxies.append(ProxyInfo(
                             name=name,
                             type=proxy_type,
                             alive=info.get('alive', True),
-                            delay=info.get('history', [{}])[-1].get('delay')
+                            delay=delay
                         ))
                 
+                logger.info(f"获取到 {len(proxies)} 个代理节点")
                 return proxies
                 
         except Exception as e:
@@ -83,7 +102,7 @@ class ClashClient:
     async def get_proxy_group(self, group_name: str = "GLOBAL") -> Optional[dict]:
         """获取代理组信息"""
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with httpx.AsyncClient(**self._client_kwargs) as client:
                 response = await client.get(
                     f"{self.api_url}/proxies/{group_name}",
                     headers=self._get_headers()
@@ -106,7 +125,7 @@ class ClashClient:
             是否成功
         """
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with httpx.AsyncClient(**self._client_kwargs) as client:
                 response = await client.put(
                     f"{self.api_url}/proxies/{group_name}",
                     headers=self._get_headers(),
@@ -132,7 +151,7 @@ class ClashClient:
             延迟（毫秒）或None
         """
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with httpx.AsyncClient(**self._client_kwargs) as client:
                 response = await client.get(
                     f"{self.api_url}/proxies/{proxy_name}/delay",
                     headers=self._get_headers(),
@@ -154,7 +173,7 @@ class ClashClient:
     async def check_connection(self) -> bool:
         """检查与Clash的连接"""
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with httpx.AsyncClient(**self._client_kwargs) as client:
                 response = await client.get(
                     f"{self.api_url}/version",
                     headers=self._get_headers()
@@ -195,8 +214,7 @@ class ProxyRotator:
     
     def get_proxy_url(self) -> str:
         """获取代理URL（用于httpx）"""
-        # Clash的HTTP代理端口，默认7890
-        return "http://127.0.0.1:7890"
+        return f"http://127.0.0.1:{config.CLASH_PROXY_PORT}"
     
     def remove_proxy(self, proxy_name: str):
         """移除故障代理"""

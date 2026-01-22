@@ -69,6 +69,26 @@ class TelegramValidator:
         """
         self.proxy_url = proxy_url
         self.timeout = httpx.Timeout(config.REQUEST_TIMEOUT, connect=5.0)
+        self._client: Optional[httpx.AsyncClient] = None
+    
+    async def _get_client(self) -> httpx.AsyncClient:
+        """获取或创建 httpx 客户端（复用连接）"""
+        if self._client is None or self._client.is_closed:
+            client_kwargs = {
+                "timeout": self.timeout,
+                "follow_redirects": True,
+                "limits": httpx.Limits(max_keepalive_connections=10, max_connections=20),
+            }
+            if self.proxy_url:
+                client_kwargs["proxy"] = self.proxy_url
+            self._client = httpx.AsyncClient(**client_kwargs)
+        return self._client
+    
+    async def close(self):
+        """关闭客户端"""
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
+            self._client = None
     
     def _get_random_user_agent(self) -> str:
         """获取随机User-Agent"""
@@ -190,18 +210,11 @@ class TelegramValidator:
         result = ValidationResult(proxy_used=self.proxy_url)
         
         try:
-            # 创建客户端
-            client_kwargs = {
-                "timeout": self.timeout,
-                "follow_redirects": True,
-                "headers": self._get_headers(),
-            }
+            # 获取复用的客户端
+            client = await self._get_client()
             
-            if self.proxy_url:
-                client_kwargs["proxy"] = self.proxy_url
-            
-            async with httpx.AsyncClient(**client_kwargs) as client:
-                response = await client.get(url)
+            # 发送请求
+            response = await client.get(url, headers=self._get_headers())
                 
             result.response_time_ms = int((time.time() - start_time) * 1000)
             result.http_status = response.status_code
@@ -291,11 +304,18 @@ class ValidatorPool:
         self._lock = asyncio.Lock()
         
         if self.proxy_urls:
-            for proxy_url in self.proxy_urls:
+            # 代理模式：创建多个验证器实例以支持真正的并发
+            concurrency = config.PROXY_CONCURRENCY
+            for i in range(concurrency):
+                proxy_url = self.proxy_urls[i % len(self.proxy_urls)]
                 self.validators.append(TelegramValidator(proxy_url))
+            logger.info(f"创建 {concurrency} 个验证器实例，代理: {self.proxy_urls}")
         else:
-            # 无代理模式
-            self.validators.append(TelegramValidator())
+            # 直连模式：也创建多个验证器实例支持并发
+            concurrency = config.DIRECT_CONCURRENCY
+            for i in range(concurrency):
+                self.validators.append(TelegramValidator())
+            logger.info(f"创建 {concurrency} 个直连验证器实例")
     
     async def get_validator(self) -> TelegramValidator:
         """获取下一个验证器（轮询）"""
@@ -307,4 +327,5 @@ class ValidatorPool:
     async def validate(self, url: str) -> ValidationResult:
         """使用池中的验证器验证链接"""
         validator = await self.get_validator()
-        return await validator.validate_with_retry(url)
+        # 直接验证，不重试（加快速度）
+        return await validator.validate(url)
