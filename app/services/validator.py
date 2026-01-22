@@ -17,20 +17,25 @@ from app import config
 
 logger = logging.getLogger(__name__)
 
-# 群名提取正则（从og:title meta标签，支持各种格式）
+# 群名提取正则（按优先级排序）
+# 1. Telegram 特有的 class（最准确）
+TGME_TITLE_PATTERN = re.compile(r'<div[^>]+class="tgme_page_title"[^>]*>\s*<span[^>]*>([^<]+)</span>', re.IGNORECASE)
+TGME_TITLE_PATTERN2 = re.compile(r'class="tgme_page_title"[^>]*>([^<]+)<', re.IGNORECASE)
+# 2. og:title meta标签
 OG_TITLE_PATTERNS = [
-    # 标准格式
     re.compile(r'<meta\s+property=["\']og:title["\']\s+content=["\']([^"\']+)["\']', re.IGNORECASE),
     re.compile(r'<meta\s+content=["\']([^"\']+)["\']\s+property=["\']og:title["\']', re.IGNORECASE),
-    # 更宽松的匹配（允许更多空格和其他属性）
     re.compile(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']', re.IGNORECASE),
     re.compile(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:title["\']', re.IGNORECASE),
 ]
-# 备选：从title标签
+# 3. title标签（最后的备选）
 TITLE_PATTERN = re.compile(r'<title>([^<]+)</title>', re.IGNORECASE)
-# 成员数提取（更宽松的匹配）
+
+# 成员数提取（从 tgme_page_extra 或页面其他位置）
+TGME_EXTRA_PATTERN = re.compile(r'class="tgme_page_extra"[^>]*>([^<]+)<', re.IGNORECASE)
 MEMBER_COUNT_PATTERN = re.compile(r'(\d[\d\s,]*)(?:\s*)(?:members?|subscribers?|участник|人)', re.IGNORECASE)
-# 描述提取（支持属性顺序不同）
+
+# 描述提取
 OG_DESC_PATTERNS = [
     re.compile(r'<meta\s+property=["\']og:description["\']\s+content=["\']([^"\']+)["\']', re.IGNORECASE),
     re.compile(r'<meta\s+content=["\']([^"\']+)["\']\s+property=["\']og:description["\']', re.IGNORECASE),
@@ -143,32 +148,64 @@ class TelegramValidator:
         
         logger.debug(f"[{url}] 解析响应，HTML长度: {len(html)}")
         
-        # 先检测是否有成员数（有成员数就是群组/频道）
+        # 1. 先从 tgme_page_extra 提取成员数（最可靠）
         member_count = None
-        member_match = MEMBER_COUNT_PATTERN.search(html)
-        if member_match:
-            try:
-                member_count = int(member_match.group(1).replace(' ', '').replace(',', ''))
-            except ValueError:
-                pass
+        extra_match = TGME_EXTRA_PATTERN.search(html)
+        if extra_match:
+            extra_text = extra_match.group(1)
+            logger.debug(f"[{url}] tgme_page_extra: {extra_text}")
+            member_match = MEMBER_COUNT_PATTERN.search(extra_text)
+            if member_match:
+                try:
+                    member_count = int(member_match.group(1).replace(' ', '').replace(',', ''))
+                except ValueError:
+                    pass
         
-        # 提取群名 - 尝试多种模式
+        # 如果没从 extra 找到，尝试全页面搜索
+        if not member_count:
+            member_match = MEMBER_COUNT_PATTERN.search(html)
+            if member_match:
+                try:
+                    member_count = int(member_match.group(1).replace(' ', '').replace(',', ''))
+                except ValueError:
+                    pass
+        
+        # 2. 提取群名 - 按优先级尝试
         group_name = None
-        for pattern in OG_TITLE_PATTERNS:
-            og_match = pattern.search(html)
-            if og_match:
-                group_name = og_match.group(1).strip()
-                logger.debug(f"[{url}] 从og:title提取: {group_name}")
-                break
         
+        # 2.1 首先尝试 tgme_page_title（最准确）
+        tgme_match = TGME_TITLE_PATTERN.search(html)
+        if tgme_match:
+            group_name = tgme_match.group(1).strip()
+            logger.debug(f"[{url}] 从tgme_page_title(span)提取: {group_name}")
+        
+        if not group_name:
+            tgme_match2 = TGME_TITLE_PATTERN2.search(html)
+            if tgme_match2:
+                group_name = tgme_match2.group(1).strip()
+                logger.debug(f"[{url}] 从tgme_page_title提取: {group_name}")
+        
+        # 2.2 尝试 og:title
+        if not group_name:
+            for pattern in OG_TITLE_PATTERNS:
+                og_match = pattern.search(html)
+                if og_match:
+                    potential_name = og_match.group(1).strip()
+                    # 过滤掉 "Telegram: Contact @xxx" 格式
+                    if not potential_name.lower().startswith("telegram:"):
+                        group_name = potential_name
+                        logger.debug(f"[{url}] 从og:title提取: {group_name}")
+                        break
+        
+        # 2.3 最后尝试 title 标签
         if not group_name:
             title_match = TITLE_PATTERN.search(html)
             if title_match:
                 title = title_match.group(1).strip()
-                logger.debug(f"[{url}] 从title提取: {title}")
-                # 过滤掉默认标题
-                if title and title.lower() not in ['telegram', 'telegram: contact', 'telegram: join group chat']:
+                # 过滤掉默认标题和联系页面格式
+                if title and not title.lower().startswith("telegram"):
                     group_name = title
+                    logger.debug(f"[{url}] 从title提取: {group_name}")
         
         # 关键逻辑：如果有成员数，说明是群组/频道，直接判定有效
         if member_count and member_count > 0:
