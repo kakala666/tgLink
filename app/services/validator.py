@@ -16,14 +16,20 @@ from app import config
 
 logger = logging.getLogger(__name__)
 
-# 群名提取正则（从og:title meta标签）
-OG_TITLE_PATTERN = re.compile(r'<meta\s+property=["\']og:title["\']\s+content=["\']([^"\']+)["\']', re.IGNORECASE)
+# 群名提取正则（从og:title meta标签，支持属性顺序不同）
+OG_TITLE_PATTERNS = [
+    re.compile(r'<meta\s+property=["\']og:title["\']\s+content=["\']([^"\']+)["\']', re.IGNORECASE),
+    re.compile(r'<meta\s+content=["\']([^"\']+)["\']\s+property=["\']og:title["\']', re.IGNORECASE),
+]
 # 备选：从title标签
 TITLE_PATTERN = re.compile(r'<title>([^<]+)</title>', re.IGNORECASE)
 # 成员数提取
-MEMBER_COUNT_PATTERN = re.compile(r'(\d[\d\s]*)\s*(?:members?|subscribers?)', re.IGNORECASE)
-# 描述提取
-OG_DESC_PATTERN = re.compile(r'<meta\s+property=["\']og:description["\']\s+content=["\']([^"\']+)["\']', re.IGNORECASE)
+MEMBER_COUNT_PATTERN = re.compile(r'(\d[\d\s,]*)\s*(?:members?|subscribers?|участник)', re.IGNORECASE)
+# 描述提取（支持属性顺序不同）
+OG_DESC_PATTERNS = [
+    re.compile(r'<meta\s+property=["\']og:description["\']\s+content=["\']([^"\']+)["\']', re.IGNORECASE),
+    re.compile(r'<meta\s+content=["\']([^"\']+)["\']\s+property=["\']og:description["\']', re.IGNORECASE),
+]
 
 # 无效标识（页面存在但群组无效）
 INVALID_INDICATORS = [
@@ -91,25 +97,36 @@ class TelegramValidator:
         """
         result = ValidationResult(http_status=status_code)
         
+        logger.debug(f"解析响应，HTML长度: {len(html)}")
+        
         # 检查无效标识
         for indicator in INVALID_INDICATORS:
             if indicator.lower() in html.lower():
                 result.is_valid = False
                 result.error_type = "invalid_group"
                 result.error_message = indicator
+                logger.debug(f"检测到无效标识: {indicator}")
                 return result
         
-        # 提取群名
-        og_match = OG_TITLE_PATTERN.search(html)
-        if og_match:
-            result.group_name = og_match.group(1).strip()
-        else:
+        # 提取群名 - 尝试多种模式
+        group_name = None
+        for pattern in OG_TITLE_PATTERNS:
+            og_match = pattern.search(html)
+            if og_match:
+                group_name = og_match.group(1).strip()
+                logger.debug(f"从og:title提取群名: {group_name}")
+                break
+        
+        if not group_name:
             title_match = TITLE_PATTERN.search(html)
             if title_match:
                 title = title_match.group(1).strip()
                 # 过滤掉默认标题
-                if title and title.lower() not in ['telegram', 'telegram: contact']:
-                    result.group_name = title
+                if title and title.lower() not in ['telegram', 'telegram: contact', 'telegram: join group chat']:
+                    group_name = title
+                    logger.debug(f"从title提取群名: {group_name}")
+        
+        result.group_name = group_name
         
         # 如果有群名，认为有效
         if result.group_name:
@@ -123,15 +140,21 @@ class TelegramValidator:
                 except ValueError:
                     pass
             
-            # 尝试提取描述
-            desc_match = OG_DESC_PATTERN.search(html)
-            if desc_match:
-                result.description = desc_match.group(1).strip()[:500]  # 限制长度
+            # 尝试提取描述 - 尝试多种模式
+            for pattern in OG_DESC_PATTERNS:
+                desc_match = pattern.search(html)
+                if desc_match:
+                    result.description = desc_match.group(1).strip()[:500]  # 限制长度
+                    break
+            
+            logger.info(f"验证成功: {result.group_name}, 成员: {result.member_count}")
         else:
             # 无法提取群名，可能是无效页面
             result.is_valid = False
             result.error_type = "no_group_name"
             result.error_message = "无法从页面提取群名"
+            # 记录HTML片段用于调试
+            logger.warning(f"无法提取群名，HTML前500字符: {html[:500]}")
         
         return result
     

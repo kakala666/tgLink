@@ -29,7 +29,7 @@ async def job_events(job_id: int):
     """
     
     async def event_generator():
-        last_progress = None
+        last_pending = None
         error_count = 0
         
         while True:
@@ -69,13 +69,11 @@ async def job_events(job_id: int):
                     "eta_seconds": eta
                 }
                 
-                # 只在有变化时发送
-                if current_progress != last_progress:
-                    yield {
-                        "event": "progress",
-                        "data": json.dumps(current_progress, ensure_ascii=False)
-                    }
-                    last_progress = current_progress.copy()
+                # 每次都发送进度（避免卡住）
+                yield {
+                    "event": "progress",
+                    "data": json.dumps(current_progress, ensure_ascii=False)
+                }
                 
                 # 检查任务状态
                 if job.status.value == "completed":
@@ -110,6 +108,7 @@ async def job_events(job_id: int):
                     break
                 
                 error_count = 0
+                last_pending = pending
                 await asyncio.sleep(0.5)
                 
             except Exception as e:

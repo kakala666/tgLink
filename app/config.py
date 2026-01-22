@@ -79,11 +79,11 @@ USER_AGENTS = [
 ]
 
 # ============ 导出配置 ============
-# CSV编码
-EXPORT_ENCODING = "gb2312"
+# CSV编码 - UTF-8 with BOM, Excel可正确识别中文
+EXPORT_ENCODING = "utf-8-sig"
 
-# CSV分隔符
-EXPORT_DELIMITER = "\t"
+# CSV分隔符 - 逗号分隔，Excel标准格式
+EXPORT_DELIMITER = ","
 
 # ============ 服务器配置 ============
 # 监听地址

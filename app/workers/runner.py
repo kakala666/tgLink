@@ -74,16 +74,20 @@ class TaskRunner:
         self.validator_pool: Optional[ValidatorPool] = None
         self.clash_client: Optional[ClashClient] = None
         self.proxy_rotator: Optional[ProxyRotator] = None
+        self._initialized = False
         
         self._lock = asyncio.Lock()
     
+    async def _ensure_initialized(self):
+        """确保已初始化"""
+        if not self._initialized:
+            await self.initialize()
+    
     async def initialize(self):
         """初始化运行器"""
-        # 初始化限速器
-        if config.PROXY_ENABLED:
-            self.rate_limiter = TokenBucketRateLimiter()
-        else:
-            self.simple_limiter = SimpleRateLimiter()
+        # 初始化两种限速器（都初始化，根据配置使用）
+        self.rate_limiter = TokenBucketRateLimiter()
+        self.simple_limiter = SimpleRateLimiter()
         
         # 初始化阻止检测器
         self.block_detector = BlockDetector(
@@ -102,6 +106,7 @@ class TaskRunner:
         else:
             self.validator_pool = ValidatorPool()
         
+        self._initialized = True
         logger.info(f"任务运行器初始化完成，代理模式: {config.PROXY_ENABLED}")
     
     async def _on_block_detected(self):
@@ -126,6 +131,9 @@ class TaskRunner:
         Returns:
             是否成功启动
         """
+        # 确保已初始化
+        await self._ensure_initialized()
+        
         async with self._lock:
             # 检查任务是否存在
             job = JobService.get_job(job_id)
