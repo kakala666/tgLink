@@ -39,7 +39,16 @@ INVALID_INDICATORS = [
     "this chat is private",  # 私有群
     "Group not found",  # 群组不存在
     "Channel not found",  # 频道不存在
-    "Telegram: Contact @",  # 联系页面（不是群组）
+]
+
+# 有效群组/频道的标识（优先级高于无效标识）
+VALID_INDICATORS = [
+    "members",
+    "subscribers", 
+    "online",
+    "Join Group",
+    "Join Channel",
+    "Preview channel",
 ]
 
 
@@ -117,17 +126,12 @@ class TelegramValidator:
             ValidationResult
         """
         result = ValidationResult(http_status=status_code)
+        html_lower = html.lower()
         
         logger.debug(f"解析响应，HTML长度: {len(html)}")
         
-        # 检查无效标识
-        for indicator in INVALID_INDICATORS:
-            if indicator.lower() in html.lower():
-                result.is_valid = False
-                result.error_type = "invalid_group"
-                result.error_message = indicator
-                logger.debug(f"检测到无效标识: {indicator}")
-                return result
+        # 优先检查有效群组/频道标识
+        has_valid_indicator = any(ind.lower() in html_lower for ind in VALID_INDICATORS)
         
         # 提取群名 - 尝试多种模式
         group_name = None
@@ -149,25 +153,8 @@ class TelegramValidator:
         
         result.group_name = group_name
         
-        # 检查群名是否是无效的格式
-        if result.group_name:
-            invalid_names = [
-                "telegram: contact",
-                "telegram: join group",
-                "telegram",
-            ]
-            name_lower = result.group_name.lower()
-            # 检查是否是 "Telegram: Contact @xxx" 格式
-            if name_lower.startswith("telegram: contact") or name_lower in invalid_names:
-                result.is_valid = False
-                result.error_type = "invalid_group"
-                result.error_message = "不是有效的群组或频道"
-                result.group_name = None
-                logger.debug(f"群名无效: {group_name}")
-                return result
-        
-        # 如果有群名，认为有效
-        if result.group_name:
+        # 如果有有效标识且有群名，认为有效
+        if has_valid_indicator and result.group_name:
             result.is_valid = True
             
             # 尝试提取成员数
@@ -178,21 +165,45 @@ class TelegramValidator:
                 except ValueError:
                     pass
             
-            # 尝试提取描述 - 尝试多种模式
+            # 尝试提取描述
             for pattern in OG_DESC_PATTERNS:
                 desc_match = pattern.search(html)
                 if desc_match:
-                    result.description = desc_match.group(1).strip()[:500]  # 限制长度
+                    result.description = desc_match.group(1).strip()[:500]
                     break
             
             logger.info(f"验证成功: {result.group_name}, 成员: {result.member_count}")
-        else:
-            # 无法提取群名，可能是无效页面
-            result.is_valid = False
-            result.error_type = "no_group_name"
-            result.error_message = "无法从页面提取群名"
-            # 记录HTML片段用于调试
-            logger.warning(f"无法提取群名，HTML前500字符: {html[:500]}")
+            return result
+        
+        # 检查无效标识
+        for indicator in INVALID_INDICATORS:
+            if indicator.lower() in html_lower:
+                result.is_valid = False
+                result.error_type = "invalid_group"
+                result.error_message = indicator
+                result.group_name = None
+                logger.debug(f"检测到无效标识: {indicator}")
+                return result
+        
+        # 有群名但没有有效标识，可能是用户页面
+        if result.group_name:
+            name_lower = result.group_name.lower()
+            if name_lower.startswith("telegram: contact"):
+                result.is_valid = False
+                result.error_type = "invalid_group"
+                result.error_message = "用户联系页面，不是群组或频道"
+                result.group_name = None
+                return result
+            # 有群名，认为有效
+            result.is_valid = True
+            logger.info(f"验证成功: {result.group_name}")
+            return result
+        
+        # 无法提取群名
+        result.is_valid = False
+        result.error_type = "no_group_name"
+        result.error_message = "无法从页面提取群名"
+        logger.warning(f"无法提取群名，HTML前500字符: {html[:500]}")
         
         return result
     
