@@ -132,28 +132,19 @@ class TelegramValidator:
         }
     
     def _parse_response(self, html: str, status_code: int, url: str = "") -> ValidationResult:
-        """
-        解析响应内容
-        
-        Args:
-            html: HTML内容
-            status_code: HTTP状态码
-            url: 请求的URL（用于日志）
-            
-        Returns:
-            ValidationResult
-        """
+        """解析响应内容"""
         result = ValidationResult(http_status=status_code)
         html_lower = html.lower()
         
-        logger.debug(f"[{url}] 解析响应，HTML长度: {len(html)}")
+        # 检测是否是限流/验证码页面
+        if len(html) < 1000:
+            logger.warning(f"[{url}] 页面内容过短({len(html)}字节)，可能是限流页面")
         
-        # 1. 先从 tgme_page_extra 提取成员数（最可靠）
+        # 1. 提取成员数
         member_count = None
         extra_match = TGME_EXTRA_PATTERN.search(html)
         if extra_match:
             extra_text = extra_match.group(1)
-            logger.debug(f"[{url}] tgme_page_extra: {extra_text}")
             member_match = MEMBER_COUNT_PATTERN.search(extra_text)
             if member_match:
                 try:
@@ -161,7 +152,6 @@ class TelegramValidator:
                 except ValueError:
                     pass
         
-        # 如果没从 extra 找到，尝试全页面搜索
         if not member_count:
             member_match = MEMBER_COUNT_PATTERN.search(html)
             if member_match:
@@ -170,65 +160,53 @@ class TelegramValidator:
                 except ValueError:
                     pass
         
-        # 2. 提取群名 - 按优先级尝试
+        # 2. 提取群名（按优先级）
         group_name = None
+        source = None
         
-        # 2.1 首先尝试 tgme_page_title（最准确）
+        # 2.1 tgme_page_title
         tgme_match = TGME_TITLE_PATTERN.search(html)
         if tgme_match:
             group_name = tgme_match.group(1).strip()
-            logger.debug(f"[{url}] 从tgme_page_title(span)提取: {group_name}")
+            source = "tgme_page_title(span)"
         
         if not group_name:
             tgme_match2 = TGME_TITLE_PATTERN2.search(html)
             if tgme_match2:
                 group_name = tgme_match2.group(1).strip()
-                logger.debug(f"[{url}] 从tgme_page_title提取: {group_name}")
+                source = "tgme_page_title"
         
-        # 2.2 尝试 og:title
+        # 2.2 og:title（过滤 Telegram: 前缀）
         if not group_name:
             for pattern in OG_TITLE_PATTERNS:
                 og_match = pattern.search(html)
                 if og_match:
                     potential_name = og_match.group(1).strip()
-                    # 过滤掉 "Telegram: Contact @xxx" 格式
                     if not potential_name.lower().startswith("telegram:"):
                         group_name = potential_name
-                        logger.debug(f"[{url}] 从og:title提取: {group_name}")
+                        source = "og:title"
                         break
         
-        # 2.3 最后尝试 title 标签
+        # 2.3 title 标签
         if not group_name:
             title_match = TITLE_PATTERN.search(html)
             if title_match:
                 title = title_match.group(1).strip()
-                # 过滤掉默认标题和联系页面格式
                 if title and not title.lower().startswith("telegram"):
                     group_name = title
-                    logger.debug(f"[{url}] 从title提取: {group_name}")
+                    source = "title"
         
-        # 关键逻辑：如果有成员数，说明是群组/频道，直接判定有效
+        # 3. 判断有效性
+        
+        # 3.1 有成员数 → 有效
         if member_count and member_count > 0:
             result.is_valid = True
             result.member_count = member_count
-            # 如果群名是 "Telegram: Contact @xxx"，尝试从其他地方提取真正的群名
-            if group_name and group_name.lower().startswith("telegram: contact"):
-                # 尝试从 og:description 提取
-                for pattern in OG_DESC_PATTERNS:
-                    desc_match = pattern.search(html)
-                    if desc_match:
-                        result.description = desc_match.group(1).strip()[:500]
-                        # 用描述的前30个字符作为群名
-                        result.group_name = result.description[:30] + "..."
-                        break
-                if not result.group_name:
-                    result.group_name = f"群组({member_count}人)"
-            else:
-                result.group_name = group_name
-            logger.info(f"[{url}] 有效(有成员数): {result.group_name}, 成员: {member_count}")
+            result.group_name = group_name or f"群组({member_count}人)"
+            logger.info(f"[{url}] 有效: {result.group_name}, 成员: {member_count}, 来源: {source}")
             return result
         
-        # 检查无效标识（优先判断明确无效的情况）
+        # 3.2 检查无效标识
         for indicator in INVALID_INDICATORS:
             if indicator.lower() in html_lower:
                 result.is_valid = False
@@ -237,84 +215,28 @@ class TelegramValidator:
                 logger.info(f"[{url}] 无效: {indicator}")
                 return result
         
-        # 如果有群名，进一步检查
+        # 3.3 有群名（非联系页面格式）→ 有效
         if group_name:
-            # 过滤掉用户联系页面（没有成员数的情况下）
-            name_lower = group_name.lower()
-            if name_lower.startswith("telegram: contact"):
-                result.is_valid = False
-                result.error_type = "invalid_group"
-                result.error_message = "用户联系页面(无成员数)"
-                logger.info(f"[{url}] 无效: 用户联系页面 ({group_name})")
-                return result
-            
-            # 有群名就认为有效
-            result.is_valid = True
-            result.group_name = group_name
-            result.member_count = member_count
-            
-            # 尝试提取描述
-            for pattern in OG_DESC_PATTERNS:
-                desc_match = pattern.search(html)
-                if desc_match:
-                    result.description = desc_match.group(1).strip()[:500]
-                    break
-            
-            logger.info(f"[{url}] 有效: {group_name}, 成员: {result.member_count}")
-            return result
-        
-        # 如果有群名，进一步检查
-        if group_name:
-            # 过滤掉用户联系页面
-            name_lower = group_name.lower()
-            if name_lower.startswith("telegram: contact"):
+            if group_name.lower().startswith("telegram: contact"):
                 result.is_valid = False
                 result.error_type = "invalid_group"
                 result.error_message = "用户联系页面"
-                logger.info(f"[{url}] 无效: 用户联系页面 ({group_name})")
+                logger.info(f"[{url}] 无效: 用户联系页面")
                 return result
             
-            # 有群名就认为有效
             result.is_valid = True
             result.group_name = group_name
-            
-            # 尝试提取成员数
-            member_match = MEMBER_COUNT_PATTERN.search(html)
-            if member_match:
-                try:
-                    result.member_count = int(member_match.group(1).replace(' ', '').replace(',', ''))
-                except ValueError:
-                    pass
-            
-            # 尝试提取描述
-            for pattern in OG_DESC_PATTERNS:
-                desc_match = pattern.search(html)
-                if desc_match:
-                    result.description = desc_match.group(1).strip()[:500]
-                    break
-            
-            logger.info(f"[{url}] 有效: {group_name}, 成员: {result.member_count}")
+            logger.info(f"[{url}] 有效: {group_name}, 来源: {source}")
             return result
         
-        # 无法提取群名 - 记录详细信息用于调试
+        # 3.4 无法提取任何信息 → 无效
         result.is_valid = False
         result.error_type = "no_group_name"
         result.error_message = "无法提取群名"
         
-        # 尝试找出页面实际内容
-        og_title_raw = ""
-        title_raw = ""
-        if '<meta' in html and 'og:title' in html:
-            og_title_raw = html[html.find('og:title'):html.find('og:title')+200]
-        if '<title>' in html:
-            start = html.find('<title>')
-            end = html.find('</title>')
-            if end > start:
-                title_raw = html[start:end+8]
-        
-        logger.warning(f"[{url}] 无效: 无法提取群名 | og:title附近: {og_title_raw[:100]} | title: {title_raw[:100]}")
-        
-        return result
+        # 输出调试信息
+        html_snippet = html[:500].replace('\n', ' ').replace('\r', '')
+        logger.warning(f"[{url}] 无效: 无法提取群名 | HTML前500字符: {html_snippet}")
         
         return result
     
