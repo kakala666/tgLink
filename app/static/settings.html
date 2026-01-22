@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>设置 - TG群链接验证工具</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar">
+        <div class="container">
+            <a href="/" class="navbar-brand">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .37z"/>
+                </svg>
+                TG群链接验证工具
+            </a>
+            <ul class="navbar-nav">
+                <li><a href="/">首页</a></li>
+                <li><a href="/jobs">任务列表</a></li>
+                <li><a href="/settings" class="active">设置</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="container" style="padding-top: 30px;">
+        <!-- Clash状态 -->
+        <div class="card">
+            <div class="card-header">
+                <span>Clash 代理状态</span>
+                <button class="btn btn-secondary btn-sm" onclick="checkClashStatus()">刷新</button>
+            </div>
+            <div class="card-body">
+                <div id="clash-status">
+                    <div class="d-flex align-items-center gap-1">
+                        <div class="spinner"></div>
+                        <span>检查中...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 代理设置 -->
+        <div class="card">
+            <div class="card-header">
+                <span>代理设置</span>
+            </div>
+            <div class="card-body">
+                <div class="form-group">
+                    <label class="form-label">代理模式</label>
+                    <div class="d-flex gap-2">
+                        <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                            <input type="radio" name="proxy_mode" value="true" id="proxy-enabled">
+                            使用代理（推荐）
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                            <input type="radio" name="proxy_mode" value="false" id="proxy-disabled">
+                            直连模式
+                        </label>
+                    </div>
+                    <p class="form-text">代理模式: 50并发，约14小时完成120万链接<br>直连模式: 1并发，约14天完成120万链接</p>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Clash API 地址</label>
+                    <input type="text" class="form-control" id="clash-api-url" placeholder="http://127.0.0.1:9090">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">代理模式并发数</label>
+                    <input type="number" class="form-control" id="proxy-concurrency" min="1" max="100">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">直连模式请求间隔（秒）</label>
+                    <input type="number" class="form-control" id="direct-interval" min="0.1" step="0.1">
+                </div>
+            </div>
+        </div>
+
+        <!-- 限速设置 -->
+        <div class="card">
+            <div class="card-header">
+                <span>限速设置</span>
+            </div>
+            <div class="card-body">
+                <div class="form-group">
+                    <label class="form-label">令牌桶容量</label>
+                    <input type="number" class="form-control" id="bucket-size" min="10" max="1000">
+                    <p class="form-text">最大可累积的令牌数</p>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">令牌恢复速率（每秒）</label>
+                    <input type="number" class="form-control" id="refill-rate" min="1" max="100">
+                </div>
+            </div>
+        </div>
+
+        <!-- 阻止检测设置 -->
+        <div class="card">
+            <div class="card-header">
+                <span>阻止检测设置</span>
+            </div>
+            <div class="card-body">
+                <div class="form-group">
+                    <label class="form-label">检测窗口（秒）</label>
+                    <input type="number" class="form-control" id="detection-window" min="10" max="300">
+                    <p class="form-text">统计错误的时间窗口</p>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">触发阈值</label>
+                    <input type="number" class="form-control" id="detection-threshold" min="1" max="20">
+                    <p class="form-text">窗口内连续N个错误触发暂停</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 请求设置 -->
+        <div class="card">
+            <div class="card-header">
+                <span>请求设置</span>
+            </div>
+            <div class="card-body">
+                <div class="form-group">
+                    <label class="form-label">请求超时（秒）</label>
+                    <input type="number" class="form-control" id="request-timeout" min="5" max="60">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">重试次数</label>
+                    <input type="number" class="form-control" id="request-retries" min="0" max="10">
+                </div>
+            </div>
+        </div>
+
+        <!-- 保存按钮 -->
+        <div class="d-flex gap-1 mb-2">
+            <button class="btn btn-primary btn-lg" onclick="saveConfig()">保存设置</button>
+            <button class="btn btn-secondary btn-lg" onclick="loadConfig()">重置</button>
+        </div>
+        
+        <div class="alert alert-info">
+            <span>注意：设置更改仅在当前运行期间有效，重启服务后恢复默认值。如需永久修改，请编辑 config.py 文件。</span>
+        </div>
+    </div>
+
+    <script src="/static/js/api.js"></script>
+    <script src="/static/js/app.js"></script>
+    <script>
+        // 初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            loadConfig();
+            checkClashStatus();
+        });
+        
+        // 加载配置
+        async function loadConfig() {
+            try {
+                const config = await API.getConfig();
+                
+                if (config.proxy_enabled) {
+                    document.getElementById('proxy-enabled').checked = true;
+                } else {
+                    document.getElementById('proxy-disabled').checked = true;
+                }
+                
+                document.getElementById('clash-api-url').value = config.clash_api_url;
+                document.getElementById('proxy-concurrency').value = config.proxy_concurrency;
+                document.getElementById('direct-interval').value = config.direct_request_interval;
+                document.getElementById('bucket-size').value = config.rate_limit_bucket_size;
+                document.getElementById('refill-rate').value = config.rate_limit_refill_rate;
+                document.getElementById('detection-window').value = config.block_detection_window;
+                document.getElementById('detection-threshold').value = config.block_detection_threshold;
+                document.getElementById('request-timeout').value = config.request_timeout;
+                document.getElementById('request-retries').value = config.request_retries;
+                
+            } catch (e) {
+                App.showMessage('加载配置失败: ' + e.message, 'danger');
+            }
+        }
+        
+        // 保存配置
+        async function saveConfig() {
+            const config = {
+                proxy_enabled: document.getElementById('proxy-enabled').checked,
+                clash_api_url: document.getElementById('clash-api-url').value,
+                proxy_concurrency: parseInt(document.getElementById('proxy-concurrency').value),
+                direct_request_interval: parseFloat(document.getElementById('direct-interval').value),
+                rate_limit_bucket_size: parseInt(document.getElementById('bucket-size').value),
+                rate_limit_refill_rate: parseInt(document.getElementById('refill-rate').value),
+                block_detection_window: parseInt(document.getElementById('detection-window').value),
+                block_detection_threshold: parseInt(document.getElementById('detection-threshold').value),
+                request_timeout: parseInt(document.getElementById('request-timeout').value),
+                request_retries: parseInt(document.getElementById('request-retries').value)
+            };
+            
+            try {
+                const result = await API.updateConfig(config);
+                App.showMessage(result.message, 'success');
+            } catch (e) {
+                App.showMessage('保存失败: ' + e.message, 'danger');
+            }
+        }
+        
+        // 检查Clash状态
+        async function checkClashStatus() {
+            const container = document.getElementById('clash-status');
+            container.innerHTML = `
+                <div class="d-flex align-items-center gap-1">
+                    <div class="spinner"></div>
+                    <span>检查中...</span>
+                </div>
+            `;
+            
+            try {
+                const status = await API.getClashStatus();
+                
+                if (status.connected) {
+                    let html = `
+                        <div class="alert alert-success mb-1">
+                            <span>已连接 - 共 ${status.proxy_count} 个代理</span>
+                        </div>
+                    `;
+                    
+                    if (status.proxies.length > 0) {
+                        html += '<div class="table-responsive"><table class="table"><thead><tr><th>名称</th><th>类型</th><th>状态</th></tr></thead><tbody>';
+                        for (const proxy of status.proxies) {
+                            html += `
+                                <tr>
+                                    <td>${proxy.name}</td>
+                                    <td>${proxy.type}</td>
+                                    <td>${proxy.alive ? '<span class="text-success">在线</span>' : '<span class="text-danger">离线</span>'}</td>
+                                </tr>
+                            `;
+                        }
+                        html += '</tbody></table></div>';
+                        
+                        if (status.proxy_count > 10) {
+                            html += `<p class="text-muted">显示前10个代理，共${status.proxy_count}个</p>`;
+                        }
+                    }
+                    
+                    container.innerHTML = html;
+                } else {
+                    container.innerHTML = `
+                        <div class="alert alert-danger">
+                            <span>未连接 - 请确保 Clash 正在运行并且 API 地址正确</span>
+                        </div>
+                    `;
+                }
+                
+            } catch (e) {
+                container.innerHTML = `
+                    <div class="alert alert-danger">
+                        <span>检查失败: ${e.message}</span>
+                    </div>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>

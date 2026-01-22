@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>任务列表 - TG群链接验证工具</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar">
+        <div class="container">
+            <a href="/" class="navbar-brand">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .37z"/>
+                </svg>
+                TG群链接验证工具
+            </a>
+            <ul class="navbar-nav">
+                <li><a href="/">首页</a></li>
+                <li><a href="/jobs" class="active">任务列表</a></li>
+                <li><a href="/settings">设置</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="container" style="padding-top: 30px;">
+        <div class="card">
+            <div class="card-header">
+                <span>任务列表</span>
+                <a href="/" class="btn btn-primary btn-sm">创建任务</a>
+            </div>
+            <div class="card-body">
+                <div id="jobs-list">
+                    <div class="empty-state">
+                        <div class="spinner" style="margin: 0 auto;"></div>
+                        <p class="mt-1">加载中...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/api.js"></script>
+    <script src="/static/js/app.js"></script>
+    <script>
+        // 初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            loadJobs();
+        });
+        
+        // 加载任务列表
+        async function loadJobs() {
+            const container = document.getElementById('jobs-list');
+            
+            try {
+                const data = await API.getJobs();
+                
+                if (data.jobs.length === 0) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">📋</div>
+                            <div class="empty-state-text">暂无任务</div>
+                            <a href="/" class="btn btn-primary">创建第一个任务</a>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                let html = `
+                    <div class="table-responsive">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>任务名称</th>
+                                    <th>状态</th>
+                                    <th>进度</th>
+                                    <th>有效/无效/错误</th>
+                                    <th>创建时间</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                `;
+                
+                for (const job of data.jobs) {
+                    const progress = job.total_count > 0 
+                        ? ((job.total_count - job.pending_count) / job.total_count * 100).toFixed(1) 
+                        : 0;
+                    
+                    html += `
+                        <tr>
+                            <td>${job.id}</td>
+                            <td><a href="/job/${job.id}">${job.name}</a></td>
+                            <td>${App.getStatusBadge(job.status)}</td>
+                            <td>
+                                <div class="d-flex align-items-center gap-1">
+                                    <div class="progress" style="width: 100px; height: 8px;">
+                                        <div class="progress-bar" style="width: ${progress}%"></div>
+                                    </div>
+                                    <span class="text-muted">${progress}%</span>
+                                </div>
+                            </td>
+                            <td>
+                                <span class="text-success">${App.formatNumber(job.valid_count)}</span> / 
+                                <span class="text-danger">${App.formatNumber(job.invalid_count)}</span> / 
+                                <span class="text-warning">${App.formatNumber(job.error_count)}</span>
+                            </td>
+                            <td>${App.formatDateTime(job.created_at)}</td>
+                            <td>
+                                <div class="d-flex gap-1">
+                                    <a href="/job/${job.id}" class="btn btn-primary btn-sm">查看</a>
+                                    ${getActionButtons(job)}
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                }
+                
+                html += '</tbody></table></div>';
+                container.innerHTML = html;
+                
+            } catch (e) {
+                container.innerHTML = `
+                    <div class="alert alert-danger">
+                        加载失败: ${e.message}
+                    </div>
+                `;
+            }
+        }
+        
+        // 获取操作按钮
+        function getActionButtons(job) {
+            const buttons = [];
+            
+            switch (job.status) {
+                case 'pending':
+                    buttons.push(`<button class="btn btn-success btn-sm" onclick="startJob(${job.id})">启动</button>`);
+                    buttons.push(`<button class="btn btn-danger btn-sm" onclick="deleteJob(${job.id})">删除</button>`);
+                    break;
+                case 'running':
+                    buttons.push(`<button class="btn btn-warning btn-sm" onclick="pauseJob(${job.id})">暂停</button>`);
+                    buttons.push(`<button class="btn btn-danger btn-sm" onclick="stopJob(${job.id})">停止</button>`);
+                    break;
+                case 'paused':
+                    buttons.push(`<button class="btn btn-success btn-sm" onclick="resumeJob(${job.id})">继续</button>`);
+                    buttons.push(`<button class="btn btn-danger btn-sm" onclick="stopJob(${job.id})">停止</button>`);
+                    break;
+                case 'completed':
+                case 'failed':
+                case 'cancelled':
+                    buttons.push(`<button class="btn btn-danger btn-sm" onclick="deleteJob(${job.id})">删除</button>`);
+                    break;
+            }
+            
+            return buttons.join('');
+        }
+        
+        // 启动任务
+        async function startJob(jobId) {
+            try {
+                await API.startJob(jobId);
+                App.showMessage('任务已启动', 'success');
+                loadJobs();
+            } catch (e) {
+                App.showMessage('启动失败: ' + e.message, 'danger');
+            }
+        }
+        
+        // 暂停任务
+        async function pauseJob(jobId) {
+            try {
+                await API.pauseJob(jobId);
+                App.showMessage('任务已暂停', 'success');
+                loadJobs();
+            } catch (e) {
+                App.showMessage('暂停失败: ' + e.message, 'danger');
+            }
+        }
+        
+        // 继续任务
+        async function resumeJob(jobId) {
+            try {
+                await API.resumeJob(jobId);
+                App.showMessage('任务已继续', 'success');
+                loadJobs();
+            } catch (e) {
+                App.showMessage('继续失败: ' + e.message, 'danger');
+            }
+        }
+        
+        // 停止任务
+        async function stopJob(jobId) {
+            if (!App.confirm('确定要停止此任务吗？')) return;
+            
+            try {
+                await API.stopJob(jobId);
+                App.showMessage('任务停止中', 'success');
+                loadJobs();
+            } catch (e) {
+                App.showMessage('停止失败: ' + e.message, 'danger');
+            }
+        }
+        
+        // 删除任务
+        async function deleteJob(jobId) {
+            if (!App.confirm('确定要删除此任务吗？相关结果也会被删除。')) return;
+            
+            try {
+                await API.deleteJob(jobId);
+                App.showMessage('任务已删除', 'success');
+                loadJobs();
+            } catch (e) {
+                App.showMessage('删除失败: ' + e.message, 'danger');
+            }
+        }
+    </script>
+</body>
+</html>

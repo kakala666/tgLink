@@ -1,0 +1,24 @@
+[Unit]
+Description=TG Link Validator - Telegram群链接验证工具
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/tglink
+Environment="PATH=/opt/tglink/venv/bin"
+ExecStart=/opt/tglink/venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=10
+
+# 日志
+StandardOutput=append:/var/log/tglink/app.log
+StandardError=append:/var/log/tglink/error.log
+
+# 安全设置
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

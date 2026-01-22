@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TG群链接验证工具</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar">
+        <div class="container">
+            <a href="/" class="navbar-brand">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .37z"/>
+                </svg>
+                TG群链接验证工具
+            </a>
+            <ul class="navbar-nav">
+                <li><a href="/" class="active">首页</a></li>
+                <li><a href="/jobs">任务列表</a></li>
+                <li><a href="/settings">设置</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="container" style="padding-top: 30px;">
+        <!-- 统计卡片 -->
+        <div class="stats-grid" id="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value" id="total-links">0</div>
+                <div class="stat-label">总链接数</div>
+            </div>
+            <div class="stat-card success">
+                <div class="stat-value" id="valid-links">0</div>
+                <div class="stat-label">有效链接</div>
+            </div>
+            <div class="stat-card danger">
+                <div class="stat-value" id="invalid-links">0</div>
+                <div class="stat-label">无效链接</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="pending-links">0</div>
+                <div class="stat-label">待验证</div>
+            </div>
+        </div>
+
+        <!-- 文件上传 -->
+        <div class="card">
+            <div class="card-header">
+                <span>上传链接文件</span>
+            </div>
+            <div class="card-body">
+                <div class="file-upload" id="file-upload">
+                    <div class="file-upload-icon">📁</div>
+                    <div class="file-upload-text">点击或拖拽文件到此处上传</div>
+                    <div class="file-upload-hint">支持 .txt 文件，每行一个链接</div>
+                    <input type="file" id="file-input" accept=".txt">
+                </div>
+                
+                <!-- 上传进度 -->
+                <div id="upload-progress" style="display: none; margin-top: 20px;">
+                    <div class="d-flex justify-between mb-1">
+                        <span id="upload-filename">上传中...</span>
+                        <span id="upload-percent">0%</span>
+                    </div>
+                    <div class="progress">
+                        <div class="progress-bar" id="upload-bar" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 导入操作 -->
+        <div class="card" id="import-card" style="display: none;">
+            <div class="card-header">
+                <span>导入链接</span>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-info">
+                    <span>文件已上传，点击"开始导入"解析链接并去重入库</span>
+                </div>
+                <div id="import-info" class="mb-2">
+                    <p><strong>文件名：</strong><span id="import-filename"></span></p>
+                    <p><strong>文件大小：</strong><span id="import-filesize"></span></p>
+                </div>
+                <div class="d-flex gap-1">
+                    <button class="btn btn-primary" id="btn-import" onclick="startImport()">开始导入</button>
+                    <button class="btn btn-secondary" onclick="cancelImport()">取消</button>
+                </div>
+                
+                <!-- 导入进度 -->
+                <div id="import-progress" style="display: none; margin-top: 20px;">
+                    <div class="progress mb-1">
+                        <div class="progress-bar" id="import-bar" style="width: 0%">0%</div>
+                    </div>
+                    <div class="text-muted" id="import-status">处理中...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 创建任务 -->
+        <div class="card">
+            <div class="card-header">
+                <span>创建验证任务</span>
+            </div>
+            <div class="card-body">
+                <div class="form-group">
+                    <label class="form-label">任务名称</label>
+                    <input type="text" class="form-control" id="job-name" placeholder="例如：第一批链接验证">
+                </div>
+                <div class="d-flex gap-1">
+                    <button class="btn btn-success" onclick="createJob()">创建任务</button>
+                    <a href="/jobs" class="btn btn-secondary">查看任务列表</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/api.js"></script>
+    <script src="/static/js/app.js"></script>
+    <script>
+        let uploadedFile = null;
+        
+        // 初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            loadStats();
+            initFileUpload();
+        });
+        
+        // 加载统计
+        async function loadStats() {
+            try {
+                const stats = await API.getImportStats();
+                document.getElementById('total-links').textContent = App.formatNumber(stats.total_links);
+                document.getElementById('pending-links').textContent = App.formatNumber(stats.total_links);
+            } catch (e) {
+                console.error('加载统计失败:', e);
+            }
+        }
+        
+        // 初始化文件上传
+        function initFileUpload() {
+            const dropZone = document.getElementById('file-upload');
+            const fileInput = document.getElementById('file-input');
+            
+            dropZone.addEventListener('click', () => fileInput.click());
+            
+            dropZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                dropZone.classList.add('dragover');
+            });
+            
+            dropZone.addEventListener('dragleave', () => {
+                dropZone.classList.remove('dragover');
+            });
+            
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('dragover');
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    handleFile(files[0]);
+                }
+            });
+            
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    handleFile(e.target.files[0]);
+                }
+            });
+        }
+        
+        // 处理文件
+        async function handleFile(file) {
+            if (!file.name.endsWith('.txt')) {
+                App.showMessage('只支持.txt文件', 'danger');
+                return;
+            }
+            
+            // 显示上传进度
+            const progressDiv = document.getElementById('upload-progress');
+            const filenameSpan = document.getElementById('upload-filename');
+            const percentSpan = document.getElementById('upload-percent');
+            const progressBar = document.getElementById('upload-bar');
+            
+            progressDiv.style.display = 'block';
+            filenameSpan.textContent = file.name;
+            
+            try {
+                const result = await API.uploadFile(file, (percent) => {
+                    percentSpan.textContent = percent + '%';
+                    progressBar.style.width = percent + '%';
+                });
+                
+                progressDiv.style.display = 'none';
+                
+                // 显示导入卡片
+                uploadedFile = result;
+                document.getElementById('import-card').style.display = 'block';
+                document.getElementById('import-filename').textContent = result.original_name;
+                document.getElementById('import-filesize').textContent = App.formatFileSize(result.size);
+                
+                App.showMessage('文件上传成功', 'success');
+                
+            } catch (e) {
+                progressDiv.style.display = 'none';
+                App.showMessage('上传失败: ' + e.message, 'danger');
+            }
+        }
+        
+        // 开始导入
+        async function startImport() {
+            if (!uploadedFile) return;
+            
+            const btn = document.getElementById('btn-import');
+            App.setButtonLoading(btn, true);
+            
+            const progressDiv = document.getElementById('import-progress');
+            const progressBar = document.getElementById('import-bar');
+            const statusDiv = document.getElementById('import-status');
+            
+            progressDiv.style.display = 'block';
+            
+            try {
+                // 启动异步导入
+                await API.startImportAsync(uploadedFile.filename);
+                
+                // 订阅进度
+                const eventSource = API.subscribeImportProgress(uploadedFile.filename, {
+                    onProgress: (data) => {
+                        const percent = data.progress.toFixed(1);
+                        progressBar.style.width = percent + '%';
+                        progressBar.textContent = percent + '%';
+                        statusDiv.textContent = `已处理 ${App.formatNumber(data.processed_lines)} / ${App.formatNumber(data.total_lines)} 行，` +
+                            `有效 ${App.formatNumber(data.valid_links)}，重复 ${App.formatNumber(data.duplicate_links)}，无效 ${App.formatNumber(data.invalid_lines)}`;
+                    },
+                    onCompleted: (data) => {
+                        progressBar.classList.add('success');
+                        progressBar.style.width = '100%';
+                        progressBar.textContent = '100%';
+                        statusDiv.textContent = `导入完成！有效链接 ${App.formatNumber(data.valid_links)}，` +
+                            `重复 ${App.formatNumber(data.duplicate_links)}，无效 ${App.formatNumber(data.invalid_lines)}，` +
+                            `耗时 ${data.elapsed_seconds.toFixed(1)} 秒`;
+                        App.setButtonLoading(btn, false);
+                        loadStats();
+                        App.showMessage('导入完成', 'success');
+                    },
+                    onError: (data) => {
+                        App.setButtonLoading(btn, false);
+                        App.showMessage('导入失败: ' + data.error, 'danger');
+                    }
+                });
+                
+            } catch (e) {
+                App.setButtonLoading(btn, false);
+                App.showMessage('导入失败: ' + e.message, 'danger');
+            }
+        }
+        
+        // 取消导入
+        function cancelImport() {
+            uploadedFile = null;
+            document.getElementById('import-card').style.display = 'none';
+            document.getElementById('import-progress').style.display = 'none';
+        }
+        
+        // 创建任务
+        async function createJob() {
+            const nameInput = document.getElementById('job-name');
+            const name = nameInput.value.trim();
+            
+            if (!name) {
+                App.showMessage('请输入任务名称', 'warning');
+                nameInput.focus();
+                return;
+            }
+            
+            try {
+                App.showLoading();
+                const job = await API.createJob(name);
+                App.hideLoading();
+                
+                App.showMessage('任务创建成功', 'success');
+                
+                // 跳转到任务详情页
+                window.location.href = `/job/${job.id}`;
+                
+            } catch (e) {
+                App.hideLoading();
+                App.showMessage('创建失败: ' + e.message, 'danger');
+            }
+        }
+    </script>
+</body>
+</html>

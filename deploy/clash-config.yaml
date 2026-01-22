@@ -1,0 +1,97 @@
+# Clash 配置模板
+# 用于 TG群链接验证工具
+# 请将您的VLESS节点配置填入proxies部分
+
+# 端口配置
+port: 7890
+socks-port: 7891
+mixed-port: 7892
+
+# RESTful API
+external-controller: 127.0.0.1:9090
+# secret: "your-secret-here"  # 如需密码保护，取消注释并设置密码
+
+# 允许局域网访问
+allow-lan: true
+bind-address: "*"
+
+# 模式: rule/global/direct
+mode: rule
+
+# 日志级别: silent/error/warning/info/debug
+log-level: info
+
+# DNS设置
+dns:
+  enable: true
+  listen: 0.0.0.0:53
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  nameserver:
+    - 8.8.8.8
+    - 1.1.1.1
+
+# 代理节点
+# 请将您的60个VLESS节点配置填入此处
+proxies:
+  # 示例VLESS节点配置
+  # - name: "节点1"
+  #   type: vless
+  #   server: your-server.com
+  #   port: 443
+  #   uuid: your-uuid-here
+  #   network: ws
+  #   tls: true
+  #   udp: true
+  #   ws-opts:
+  #     path: /your-path
+  #     headers:
+  #       Host: your-server.com
+
+# 代理组
+proxy-groups:
+  # 自动选择 - 选择延迟最低的节点
+  - name: "自动选择"
+    type: url-test
+    proxies:
+      # 将所有节点名称添加到此处
+      # - 节点1
+      # - 节点2
+    url: 'https://t.me'
+    interval: 300
+
+  # 负载均衡 - 用于提高并发能力
+  - name: "负载均衡"
+    type: load-balance
+    proxies:
+      # 将所有节点名称添加到此处
+      # - 节点1
+      # - 节点2
+    url: 'https://t.me'
+    interval: 300
+    strategy: round-robin  # 轮询策略
+
+  # 手动选择
+  - name: "节点选择"
+    type: select
+    proxies:
+      - 自动选择
+      - 负载均衡
+      - DIRECT
+
+# 规则
+rules:
+  # Telegram相关域名走代理
+  - DOMAIN-SUFFIX,t.me,节点选择
+  - DOMAIN-SUFFIX,telegram.me,节点选择
+  - DOMAIN-SUFFIX,telegram.org,节点选择
+  - DOMAIN-SUFFIX,telesco.pe,节点选择
+  - DOMAIN-SUFFIX,tg.dev,节点选择
+  
+  # IP规则
+  - IP-CIDR,91.108.0.0/16,节点选择,no-resolve
+  - IP-CIDR,109.239.140.0/24,节点选择,no-resolve
+  - IP-CIDR,149.154.160.0/20,节点选择,no-resolve
+  
+  # 其他走直连
+  - MATCH,DIRECT

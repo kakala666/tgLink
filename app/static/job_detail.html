@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>任务详情 - TG群链接验证工具</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar">
+        <div class="container">
+            <a href="/" class="navbar-brand">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .37z"/>
+                </svg>
+                TG群链接验证工具
+            </a>
+            <ul class="navbar-nav">
+                <li><a href="/">首页</a></li>
+                <li><a href="/jobs" class="active">任务列表</a></li>
+                <li><a href="/settings">设置</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="container" style="padding-top: 30px;">
+        <!-- 任务信息 -->
+        <div class="card">
+            <div class="card-header">
+                <span id="job-title">任务详情</span>
+                <div class="d-flex gap-1">
+                    <button class="btn btn-success btn-sm" id="btn-start" onclick="startJob()" style="display:none;">启动</button>
+                    <button class="btn btn-warning btn-sm" id="btn-pause" onclick="pauseJob()" style="display:none;">暂停</button>
+                    <button class="btn btn-success btn-sm" id="btn-resume" onclick="resumeJob()" style="display:none;">继续</button>
+                    <button class="btn btn-danger btn-sm" id="btn-stop" onclick="stopJob()" style="display:none;">停止</button>
+                </div>
+            </div>
+            <div class="card-body">
+                <!-- 统计 -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-total">0</div>
+                        <div class="stat-label">总链接</div>
+                    </div>
+                    <div class="stat-card success">
+                        <div class="stat-value" id="stat-valid">0</div>
+                        <div class="stat-label">有效</div>
+                    </div>
+                    <div class="stat-card danger">
+                        <div class="stat-value" id="stat-invalid">0</div>
+                        <div class="stat-label">无效</div>
+                    </div>
+                    <div class="stat-card warning">
+                        <div class="stat-value" id="stat-error">0</div>
+                        <div class="stat-label">错误</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-pending">0</div>
+                        <div class="stat-label">待验证</div>
+                    </div>
+                </div>
+                
+                <!-- 进度条 -->
+                <div class="mb-2">
+                    <div class="d-flex justify-between mb-1">
+                        <span>进度: <span id="progress-percent">0%</span></span>
+                        <span>速度: <span id="progress-speed">0</span>/秒 | 预计剩余: <span id="progress-eta">-</span></span>
+                    </div>
+                    <div class="progress" style="height: 25px;">
+                        <div class="progress-bar" id="progress-bar" style="width: 0%">0%</div>
+                    </div>
+                </div>
+                
+                <!-- 状态信息 -->
+                <div class="d-flex justify-between align-items-center">
+                    <div>
+                        状态: <span id="job-status"></span>
+                    </div>
+                    <div id="job-time" class="text-muted"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 导出 -->
+        <div class="card">
+            <div class="card-header">
+                <span>导出结果</span>
+            </div>
+            <div class="card-body">
+                <div class="d-flex gap-1">
+                    <a id="export-all" class="btn btn-primary" download>导出全部</a>
+                    <a id="export-valid" class="btn btn-success" download>仅导出有效</a>
+                    <a id="export-with-errors" class="btn btn-secondary" download>包含错误信息</a>
+                </div>
+                <p class="text-muted mt-1">导出为 GB2312 编码的 CSV 文件（Tab分隔），可直接用 Excel 打开</p>
+            </div>
+        </div>
+
+        <!-- 结果列表 -->
+        <div class="card">
+            <div class="card-header">
+                <span>验证结果</span>
+                <div class="d-flex gap-1">
+                    <select id="result-filter" class="form-control" style="width: auto;" onchange="loadResults()">
+                        <option value="all">全部</option>
+                        <option value="valid">仅有效</option>
+                        <option value="invalid">仅无效</option>
+                    </select>
+                    <button class="btn btn-secondary btn-sm" onclick="loadResults()">刷新</button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div id="results-list">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📋</div>
+                        <div class="empty-state-text">暂无结果</div>
+                    </div>
+                </div>
+                
+                <!-- 分页 -->
+                <div id="pagination" class="d-flex justify-between align-items-center mt-2" style="display: none;">
+                    <span class="text-muted">共 <span id="total-results">0</span> 条结果</span>
+                    <div class="d-flex gap-1">
+                        <button class="btn btn-secondary btn-sm" id="btn-prev" onclick="prevPage()">上一页</button>
+                        <span class="d-flex align-items-center">第 <span id="current-page">1</span> 页</span>
+                        <button class="btn btn-secondary btn-sm" id="btn-next" onclick="nextPage()">下一页</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/api.js"></script>
+    <script src="/static/js/app.js"></script>
+    <script>
+        // 从URL获取任务ID
+        const jobId = parseInt(window.location.pathname.split('/').pop());
+        let currentPage = 1;
+        const pageSize = 50;
+        let eventSource = null;
+        
+        // 初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            loadJob();
+            loadResults();
+            setupExportLinks();
+        });
+        
+        // 加载任务信息
+        async function loadJob() {
+            try {
+                const job = await API.getJob(jobId);
+                
+                document.getElementById('job-title').textContent = job.name;
+                document.title = job.name + ' - TG群链接验证工具';
+                
+                updateJobUI(job);
+                
+                // 如果任务正在运行，订阅SSE
+                if (job.status === 'running' || job.status === 'paused') {
+                    subscribeProgress();
+                }
+                
+            } catch (e) {
+                App.showMessage('加载任务失败: ' + e.message, 'danger');
+            }
+        }
+        
+        // 更新任务UI
+        function updateJobUI(job) {
+            // 统计
+            document.getElementById('stat-total').textContent = App.formatNumber(job.total_count);
+            document.getElementById('stat-valid').textContent = App.formatNumber(job.valid_count);
+            document.getElementById('stat-invalid').textContent = App.formatNumber(job.invalid_count);
+            document.getElementById('stat-error').textContent = App.formatNumber(job.error_count);
+            document.getElementById('stat-pending').textContent = App.formatNumber(job.pending_count);
+            
+            // 进度
+            const processed = job.total_count - job.pending_count;
+            const progress = job.total_count > 0 ? (processed / job.total_count * 100) : 0;
+            document.getElementById('progress-percent').textContent = progress.toFixed(1) + '%';
+            document.getElementById('progress-bar').style.width = progress + '%';
+            document.getElementById('progress-bar').textContent = progress.toFixed(1) + '%';
+            
+            // 状态
+            document.getElementById('job-status').innerHTML = App.getStatusBadge(job.status);
+            
+            // 时间
+            let timeText = '创建于 ' + App.formatDateTime(job.created_at);
+            if (job.started_at) {
+                timeText += ' | 开始于 ' + App.formatDateTime(job.started_at);
+            }
+            if (job.completed_at) {
+                timeText += ' | 完成于 ' + App.formatDateTime(job.completed_at);
+            }
+            document.getElementById('job-time').textContent = timeText;
+            
+            // 按钮
+            updateButtons(job.status);
+            
+            // 如果完成，更新进度条样式
+            if (job.status === 'completed') {
+                document.getElementById('progress-bar').classList.add('success');
+            }
+        }
+        
+        // 更新按钮状态
+        function updateButtons(status) {
+            const btnStart = document.getElementById('btn-start');
+            const btnPause = document.getElementById('btn-pause');
+            const btnResume = document.getElementById('btn-resume');
+            const btnStop = document.getElementById('btn-stop');
+            
+            btnStart.style.display = 'none';
+            btnPause.style.display = 'none';
+            btnResume.style.display = 'none';
+            btnStop.style.display = 'none';
+            
+            switch (status) {
+                case 'pending':
+                    btnStart.style.display = 'inline-flex';
+                    break;
+                case 'running':
+                    btnPause.style.display = 'inline-flex';
+                    btnStop.style.display = 'inline-flex';
+                    break;
+                case 'paused':
+                    btnResume.style.display = 'inline-flex';
+                    btnStop.style.display = 'inline-flex';
+                    break;
+            }
+        }
+        
+        // 订阅进度
+        function subscribeProgress() {
+            if (eventSource) {
+                eventSource.close();
+            }
+            
+            eventSource = API.subscribeJobProgress(jobId, {
+                onProgress: (data) => {
+                    document.getElementById('stat-valid').textContent = App.formatNumber(data.valid_count);
+                    document.getElementById('stat-invalid').textContent = App.formatNumber(data.invalid_count);
+                    document.getElementById('stat-error').textContent = App.formatNumber(data.error_count);
+                    document.getElementById('stat-pending').textContent = App.formatNumber(data.pending_count);
+                    
+                    document.getElementById('progress-percent').textContent = data.progress.toFixed(1) + '%';
+                    document.getElementById('progress-bar').style.width = data.progress + '%';
+                    document.getElementById('progress-bar').textContent = data.progress.toFixed(1) + '%';
+                    
+                    document.getElementById('progress-speed').textContent = data.speed.toFixed(1);
+                    document.getElementById('progress-eta').textContent = App.formatTime(data.eta_seconds);
+                    
+                    document.getElementById('job-status').innerHTML = App.getStatusBadge(data.status);
+                    updateButtons(data.status);
+                },
+                onCompleted: (data) => {
+                    App.showMessage('任务完成！有效: ' + data.valid_count + '，无效: ' + data.invalid_count, 'success');
+                    document.getElementById('progress-bar').classList.add('success');
+                    document.getElementById('job-status').innerHTML = App.getStatusBadge('completed');
+                    updateButtons('completed');
+                    loadResults();
+                },
+                onPaused: () => {
+                    document.getElementById('job-status').innerHTML = App.getStatusBadge('paused');
+                    updateButtons('paused');
+                },
+                onCancelled: () => {
+                    App.showMessage('任务已取消', 'warning');
+                    document.getElementById('job-status').innerHTML = App.getStatusBadge('cancelled');
+                    updateButtons('cancelled');
+                },
+                onError: (data) => {
+                    App.showMessage('任务错误: ' + data.error, 'danger');
+                },
+                onConnectionError: () => {
+                    console.log('SSE连接断开，5秒后重试');
+                    setTimeout(subscribeProgress, 5000);
+                }
+            });
+        }
+        
+        // 设置导出链接
+        function setupExportLinks() {
+            document.getElementById('export-all').href = API.getExportUrl(jobId);
+            document.getElementById('export-valid').href = API.getExportUrl(jobId, true);
+            document.getElementById('export-with-errors').href = API.getExportUrl(jobId, false, true);
+        }
+        
+        // 加载结果
+        async function loadResults() {
+            const container = document.getElementById('results-list');
+            const filter = document.getElementById('result-filter').value;
+            
+            try {
+                const validOnly = filter === 'valid';
+                const invalidOnly = filter === 'invalid';
+                
+                const data = await API.getResults(jobId, currentPage, pageSize, validOnly, invalidOnly);
+                
+                if (data.results.length === 0) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">📋</div>
+                            <div class="empty-state-text">暂无结果</div>
+                        </div>
+                    `;
+                    document.getElementById('pagination').style.display = 'none';
+                    return;
+                }
+                
+                let html = `
+                    <div class="table-responsive">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>链接</th>
+                                    <th>状态</th>
+                                    <th>群名</th>
+                                    <th>成员数</th>
+                                    <th>响应时间</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                `;
+                
+                for (const result of data.results) {
+                    html += `
+                        <tr>
+                            <td>
+                                <a href="${result.normalized_url}" target="_blank" title="${result.original_url}">
+                                    ${result.normalized_url}
+                                </a>
+                            </td>
+                            <td>${App.getValidBadge(result.is_valid)}</td>
+                            <td>${result.group_name || '-'}</td>
+                            <td>${result.member_count ? App.formatNumber(result.member_count) : '-'}</td>
+                            <td>${result.response_time_ms ? result.response_time_ms + 'ms' : '-'}</td>
+                        </tr>
+                    `;
+                }
+                
+                html += '</tbody></table></div>';
+                container.innerHTML = html;
+                
+                // 分页
+                document.getElementById('pagination').style.display = 'flex';
+                document.getElementById('total-results').textContent = App.formatNumber(data.total);
+                document.getElementById('current-page').textContent = currentPage;
+                document.getElementById('btn-prev').disabled = currentPage <= 1;
+                document.getElementById('btn-next').disabled = currentPage * pageSize >= data.total;
+                
+            } catch (e) {
+                container.innerHTML = `
+                    <div class="alert alert-danger">
+                        加载失败: ${e.message}
+                    </div>
+                `;
+            }
+        }
+        
+        // 上一页
+        function prevPage() {
+            if (currentPage > 1) {
+                currentPage--;
+                loadResults();
+            }
+        }
+        
+        // 下一页
+        function nextPage() {
+            currentPage++;
+            loadResults();
+        }
+        
+        // 启动任务
+        async function startJob() {
+            try {
+                await API.startJob(jobId);
+                App.showMessage('任务已启动', 'success');
+                subscribeProgress();
+                updateButtons('running');
+                document.getElementById('job-status').innerHTML = App.getStatusBadge('running');
+            } catch (e) {
+                App.showMessage('启动失败: ' + e.message, 'danger');
+            }
+        }
+        
+        // 暂停任务
+        async function pauseJob() {
+            try {
+                await API.pauseJob(jobId);
+                App.showMessage('任务已暂停', 'success');
+            } catch (e) {
+                App.showMessage('暂停失败: ' + e.message, 'danger');
+            }
+        }
+        
+        // 继续任务
+        async function resumeJob() {
+            try {
+                await API.resumeJob(jobId);
+                App.showMessage('任务已继续', 'success');
+                subscribeProgress();
+            } catch (e) {
+                App.showMessage('继续失败: ' + e.message, 'danger');
+            }
+        }
+        
+        // 停止任务
+        async function stopJob() {
+            if (!App.confirm('确定要停止此任务吗？')) return;
+            
+            try {
+                await API.stopJob(jobId);
+                App.showMessage('任务停止中', 'success');
+            } catch (e) {
+                App.showMessage('停止失败: ' + e.message, 'danger');
+            }
+        }
+        
+        // 页面卸载时关闭SSE
+        window.addEventListener('beforeunload', () => {
+            if (eventSource) {
+                eventSource.close();
+            }
+        });
+    </script>
+</body>
+</html>
