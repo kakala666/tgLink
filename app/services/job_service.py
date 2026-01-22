@@ -206,6 +206,16 @@ class JobService:
         return row['count'] if row else 0
     
     @staticmethod
+    def reset_interrupted_jobs():
+        """重置被中断的任务（服务器重启后调用）"""
+        # 把 running 状态的任务改为 paused
+        Database.execute(
+            "UPDATE jobs SET status = ? WHERE status = ?",
+            (JobStatus.PAUSED.value, JobStatus.RUNNING.value)
+        )
+        logger.info("已重置被中断的任务为暂停状态")
+    
+    @staticmethod
     def update_item_status(item_id: int, status: JobItemStatus):
         """更新任务项状态"""
         Database.execute(

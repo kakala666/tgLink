@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app import config
 from app.db.sqlite import init_db
 from app.workers.runner import task_runner
+from app.services.job_service import JobService
 
 # API路由
 from app.api.routes_files import router as files_router
@@ -38,6 +39,9 @@ async def lifespan(app: FastAPI):
     # 初始化数据库
     init_db()
     logger.info("数据库初始化完成")
+    
+    # 重置被中断的任务
+    JobService.reset_interrupted_jobs()
     
     # 初始化任务运行器
     await task_runner.initialize()
