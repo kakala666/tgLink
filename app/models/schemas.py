@@ -34,6 +34,7 @@ class JobItemStatus(str, Enum):
     PROCESSING = "processing"
     COMPLETED = "completed"
     ERROR = "error"
+    RETRY = "retry"  # 待重试（隐性限流）
 
 
 # ============ 链接模型 ============

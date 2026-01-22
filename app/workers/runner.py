@@ -236,50 +236,31 @@ class TaskRunner:
         logger.info(f"=== 任务启动 === PROXY_ENABLED={config.PROXY_ENABLED}, batch_size={batch_size}")
         
         try:
+            # 第一阶段：处理所有待处理项
+            await self._process_items(runner, job_id, batch_size, is_retry=False)
+            
+            # 第二阶段：重试循环
+            retry_round = 0
             while True:
-                # 检查停止信号
-                if runner._stop_event.is_set():
-                    JobService.update_job_status(job_id, JobStatus.CANCELLED)
+                retry_count = JobService.get_retry_count(job_id)
+                if retry_count == 0:
                     break
                 
-                # 检查暂停信号
-                await runner._pause_event.wait()
+                retry_round += 1
+                logger.info(f"=== 开始第 {retry_round} 轮重试，待重试: {retry_count} 个 ===")
                 
-                # 获取待处理项
-                items = JobService.get_pending_items(job_id, limit=batch_size)
-                logger.info(f"获取到 {len(items)} 个待处理项 (limit={batch_size})")
-                if not items:
-                    # 没有待处理项，任务完成
-                    JobService.update_job_status(job_id, JobStatus.COMPLETED)
-                    runner.state = RunnerState.IDLE
-                    runner.stats.state = RunnerState.IDLE
-                    logger.info(f"任务完成: {job_id}")
-                    break
+                # 等待一段时间再重试，让Telegram服务器恢复
+                wait_time = min(30 * retry_round, 120)  # 最多等2分钟
+                logger.info(f"等待 {wait_time} 秒后开始重试...")
+                await asyncio.sleep(wait_time)
                 
-                # 并发验证
-                tasks = []
-                for item in items:
-                    task = asyncio.create_task(
-                        self._validate_item(runner, item)
-                    )
-                    tasks.append(task)
-                
-                await asyncio.gather(*tasks, return_exceptions=True)
-                
-                # 批次间隔，避免被Telegram限流
-                batch_delay = getattr(config, 'BATCH_DELAY', 0)
-                if batch_delay > 0:
-                    await asyncio.sleep(batch_delay)
-                
-                # 更新统计
-                self._update_stats(runner)
-                
-                # 回调进度
-                if runner.progress_callback:
-                    try:
-                        await runner.progress_callback(runner.stats)
-                    except Exception as e:
-                        logger.error(f"进度回调错误: {e}")
+                await self._process_items(runner, job_id, batch_size, is_retry=True)
+            
+            # 任务完成
+            JobService.update_job_status(job_id, JobStatus.COMPLETED)
+            runner.state = RunnerState.IDLE
+            runner.stats.state = RunnerState.IDLE
+            logger.info(f"任务完成: {job_id}")
         
         except Exception as e:
             logger.exception(f"任务执行错误: {job_id}")
@@ -291,6 +272,53 @@ class TaskRunner:
             # 清理
             if job_id in self.runners:
                 del self.runners[job_id]
+    
+    async def _process_items(self, runner: JobRunner, job_id: int, batch_size: int, is_retry: bool):
+        """处理待处理项或待重试项"""
+        while True:
+            # 检查停止信号
+            if runner._stop_event.is_set():
+                JobService.update_job_status(job_id, JobStatus.CANCELLED)
+                return
+            
+            # 检查暂停信号
+            await runner._pause_event.wait()
+            
+            # 获取待处理项
+            if is_retry:
+                items = JobService.get_retry_items(job_id, limit=batch_size)
+            else:
+                items = JobService.get_pending_items(job_id, limit=batch_size)
+            
+            if not items:
+                break
+            
+            logger.info(f"获取到 {len(items)} 个{'待重试' if is_retry else '待处理'}项")
+            
+            # 并发验证
+            tasks = []
+            for item in items:
+                task = asyncio.create_task(
+                    self._validate_item(runner, item)
+                )
+                tasks.append(task)
+            
+            await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # 批次间隔
+            batch_delay = getattr(config, 'BATCH_DELAY', 0)
+            if batch_delay > 0:
+                await asyncio.sleep(batch_delay)
+            
+            # 更新统计
+            self._update_stats(runner)
+            
+            # 回调进度
+            if runner.progress_callback:
+                try:
+                    await runner.progress_callback(runner.stats)
+                except Exception as e:
+                    logger.error(f"进度回调错误: {e}")
     
     async def _validate_item(self, runner: JobRunner, item: dict):
         """验证单个项"""
@@ -341,6 +369,15 @@ class TaskRunner:
     
     def _save_result_sync(self, job_id: int, item_id: int, link_id: int, result):
         """同步保存结果（在线程池中执行）"""
+        # 判断是否需要重试（隐性限流）
+        needs_retry = result.error_type == 'rate_limit_hidden'
+        
+        if needs_retry:
+            # 标记为待重试，不保存结果
+            JobService.update_item_status(item_id, JobItemStatus.RETRY)
+            logger.info(f"标记为待重试: link_id={link_id}")
+            return
+        
         # 保存结果
         JobService.save_result(job_id, link_id, {
             'is_valid': result.is_valid,

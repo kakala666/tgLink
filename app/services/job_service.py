@@ -182,6 +182,30 @@ class JobService:
         return [dict(row) for row in rows]
     
     @staticmethod
+    def get_retry_items(job_id: int, limit: int = 100) -> List[dict]:
+        """获取待重试的任务项"""
+        rows = Database.fetchall(
+            """SELECT ji.id, ji.link_id, l.normalized_url, l.original_url
+               FROM job_items ji
+               JOIN links l ON ji.link_id = l.id
+               WHERE ji.job_id = ? AND ji.status = ?
+               ORDER BY ji.id
+               LIMIT ?""",
+            (job_id, JobItemStatus.RETRY.value, limit)
+        )
+        
+        return [dict(row) for row in rows]
+    
+    @staticmethod
+    def get_retry_count(job_id: int) -> int:
+        """获取待重试项数量"""
+        row = Database.fetchone(
+            "SELECT COUNT(*) as count FROM job_items WHERE job_id = ? AND status = ?",
+            (job_id, JobItemStatus.RETRY.value)
+        )
+        return row['count'] if row else 0
+    
+    @staticmethod
     def update_item_status(item_id: int, status: JobItemStatus):
         """更新任务项状态"""
         Database.execute(
