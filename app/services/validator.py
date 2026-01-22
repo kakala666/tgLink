@@ -17,19 +17,25 @@ from app import config
 
 logger = logging.getLogger(__name__)
 
-# 群名提取正则（从og:title meta标签，支持属性顺序不同）
+# 群名提取正则（从og:title meta标签，支持各种格式）
 OG_TITLE_PATTERNS = [
+    # 标准格式
     re.compile(r'<meta\s+property=["\']og:title["\']\s+content=["\']([^"\']+)["\']', re.IGNORECASE),
     re.compile(r'<meta\s+content=["\']([^"\']+)["\']\s+property=["\']og:title["\']', re.IGNORECASE),
+    # 更宽松的匹配（允许更多空格和其他属性）
+    re.compile(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']', re.IGNORECASE),
+    re.compile(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:title["\']', re.IGNORECASE),
 ]
 # 备选：从title标签
 TITLE_PATTERN = re.compile(r'<title>([^<]+)</title>', re.IGNORECASE)
-# 成员数提取
-MEMBER_COUNT_PATTERN = re.compile(r'(\d[\d\s,]*)\s*(?:members?|subscribers?|участник)', re.IGNORECASE)
+# 成员数提取（更宽松的匹配）
+MEMBER_COUNT_PATTERN = re.compile(r'(\d[\d\s,]*)(?:\s*)(?:members?|subscribers?|участник|人)', re.IGNORECASE)
 # 描述提取（支持属性顺序不同）
 OG_DESC_PATTERNS = [
     re.compile(r'<meta\s+property=["\']og:description["\']\s+content=["\']([^"\']+)["\']', re.IGNORECASE),
     re.compile(r'<meta\s+content=["\']([^"\']+)["\']\s+property=["\']og:description["\']', re.IGNORECASE),
+    re.compile(r'<meta[^>]+property=["\']og:description["\'][^>]+content=["\']([^"\']+)["\']', re.IGNORECASE),
+    re.compile(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:description["\']', re.IGNORECASE),
 ]
 
 # 无效标识（页面存在但群组无效）
@@ -137,21 +143,53 @@ class TelegramValidator:
         
         logger.debug(f"[{url}] 解析响应，HTML长度: {len(html)}")
         
+        # 先检测是否有成员数（有成员数就是群组/频道）
+        member_count = None
+        member_match = MEMBER_COUNT_PATTERN.search(html)
+        if member_match:
+            try:
+                member_count = int(member_match.group(1).replace(' ', '').replace(',', ''))
+            except ValueError:
+                pass
+        
         # 提取群名 - 尝试多种模式
         group_name = None
         for pattern in OG_TITLE_PATTERNS:
             og_match = pattern.search(html)
             if og_match:
                 group_name = og_match.group(1).strip()
+                logger.debug(f"[{url}] 从og:title提取: {group_name}")
                 break
         
         if not group_name:
             title_match = TITLE_PATTERN.search(html)
             if title_match:
                 title = title_match.group(1).strip()
+                logger.debug(f"[{url}] 从title提取: {title}")
                 # 过滤掉默认标题
                 if title and title.lower() not in ['telegram', 'telegram: contact', 'telegram: join group chat']:
                     group_name = title
+        
+        # 关键逻辑：如果有成员数，说明是群组/频道，直接判定有效
+        if member_count and member_count > 0:
+            result.is_valid = True
+            result.member_count = member_count
+            # 如果群名是 "Telegram: Contact @xxx"，尝试从其他地方提取真正的群名
+            if group_name and group_name.lower().startswith("telegram: contact"):
+                # 尝试从 og:description 提取
+                for pattern in OG_DESC_PATTERNS:
+                    desc_match = pattern.search(html)
+                    if desc_match:
+                        result.description = desc_match.group(1).strip()[:500]
+                        # 用描述的前30个字符作为群名
+                        result.group_name = result.description[:30] + "..."
+                        break
+                if not result.group_name:
+                    result.group_name = f"群组({member_count}人)"
+            else:
+                result.group_name = group_name
+            logger.info(f"[{url}] 有效(有成员数): {result.group_name}, 成员: {member_count}")
+            return result
         
         # 检查无效标识（优先判断明确无效的情况）
         for indicator in INVALID_INDICATORS:
@@ -161,6 +199,32 @@ class TelegramValidator:
                 result.error_message = indicator
                 logger.info(f"[{url}] 无效: {indicator}")
                 return result
+        
+        # 如果有群名，进一步检查
+        if group_name:
+            # 过滤掉用户联系页面（没有成员数的情况下）
+            name_lower = group_name.lower()
+            if name_lower.startswith("telegram: contact"):
+                result.is_valid = False
+                result.error_type = "invalid_group"
+                result.error_message = "用户联系页面(无成员数)"
+                logger.info(f"[{url}] 无效: 用户联系页面 ({group_name})")
+                return result
+            
+            # 有群名就认为有效
+            result.is_valid = True
+            result.group_name = group_name
+            result.member_count = member_count
+            
+            # 尝试提取描述
+            for pattern in OG_DESC_PATTERNS:
+                desc_match = pattern.search(html)
+                if desc_match:
+                    result.description = desc_match.group(1).strip()[:500]
+                    break
+            
+            logger.info(f"[{url}] 有效: {group_name}, 成员: {result.member_count}")
+            return result
         
         # 如果有群名，进一步检查
         if group_name:
